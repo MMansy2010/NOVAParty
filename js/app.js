@@ -340,7 +340,7 @@ class NovaApp {
     this.renderMobileLobby();
 
     // Handle Mobile Screen State Transitions based on state changes
-    if (action === 'ROUND_STARTED') {
+    if (action === 'ROUND_STARTED' || (stateStore.currentPhase === 'in_game' && action === 'ROOM_STATE_SYNC')) {
       const isMobileView = this.currentView === 'mobile';
       const hasJoined = sessionStorage.getItem('nova_joined_player');
       
@@ -351,7 +351,8 @@ class NovaApp {
 
         // Setup mobile touch controller for this round
         const mobileController = document.getElementById('mobile-game-controller');
-        gameEngine.setupMobileController(payload ? payload.gameIndex : 0, mobileController);
+        const activeIdx = (payload && payload.gameIndex !== undefined) ? payload.gameIndex : stateStore.activeGameIndex;
+        gameEngine.setupMobileController(activeIdx, mobileController);
       }
     }
 

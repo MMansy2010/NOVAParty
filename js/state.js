@@ -235,13 +235,28 @@ class GameStateStore {
     if (sessionStorage.getItem('nova_is_host') === 'true') {
       // Host sends to all connected player devices
       this.connections.forEach(conn => {
-        if (conn && conn.open) {
-          try { conn.send(message); } catch (e) {}
+        if (conn) {
+          try {
+            if (conn.open) {
+              conn.send(message);
+            } else {
+              conn.once('open', () => {
+                try { conn.send(message); } catch (e) {}
+              });
+            }
+          } catch (e) {}
         }
       });
-    } else if (this.hostConn && this.hostConn.open) {
-      // Mobile client sends to Host
-      try { this.hostConn.send(message); } catch (e) {}
+    } else if (this.hostConn) {
+      try {
+        if (this.hostConn.open) {
+          this.hostConn.send(message);
+        } else {
+          this.hostConn.once('open', () => {
+            try { this.hostConn.send(message); } catch (e) {}
+          });
+        }
+      } catch (e) {}
     }
 
     // Local Tab BroadcastChannel fallback
