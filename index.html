@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>NOVA PARTY — منصة الألعاب الجماعية المذهلة</title>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800;900&family=Tajawal:wght@400;500;700;900&display=swap" rel="stylesheet">
+  <!-- Main Stylesheet -->
+  <link rel="stylesheet" href="index.css">
+</head>
+<body class="cyber-theme">
+
+  <!-- TOP GLOBAL HEADER BAR -->
+  <header class="nova-navbar">
+    <div class="brand">
+      <span class="nova-logo-icon">⚡</span>
+      <span class="brand-text">NOVA <span class="highlight">PARTY</span></span>
+    </div>
+    
+    <div class="view-mode-selector">
+      <button class="mode-btn active" id="btn-mode-landing" onclick="app.switchView('landing')">
+        <span>🏠</span> القائمة الرئيسية
+      </button>
+      <button class="mode-btn" id="btn-mode-host" onclick="app.switchView('host')">
+        <span>🖥️</span> شاشة العرض (Host/TV)
+      </button>
+      <button class="mode-btn" id="btn-mode-mobile" onclick="app.switchView('mobile')">
+        <span>📱</span> الموبايل (Player)
+      </button>
+      <button class="mode-btn highlight-btn" id="btn-mode-simulator" onclick="app.switchView('simulator')">
+        <span>💻</span> محاكي متعدد اللاعبين
+      </button>
+    </div>
+
+    <div class="sound-toggle" onclick="audioEngine.toggleMute()">
+      <span id="sound-icon">🔊</span>
+    </div>
+  </header>
+
+  <main id="app-container">
+
+    <!-- ==================== 1. LANDING SCREEN ==================== -->
+    <section id="view-landing" class="app-view active">
+      <div class="hero-container">
+        <div class="hero-badge">⚡ لعبة التحديات والتحقيق الجماعية</div>
+        <h1 class="hero-title">NOVA <span class="gradient-text">PARTY</span></h1>
+        <p class="hero-subtitle">افتح الموقع من اللابتوب أو التلفزيون، ويدخل الجميع من موبايلاتهم برمز الغرفة لخوض أشرس المنافسات وفك أعقد القضايا!</p>
+
+        <div class="hero-cards">
+          <!-- Card 1: Host Party -->
+          <div class="hero-card glass-card" onclick="app.startAsHost('party')">
+            <div class="card-icon">🏆</div>
+            <h3>طور الحفلة — Party Mode</h3>
+            <p>ألعاب تفاعلية متنوعة: سرعة استجابة، ذاكرة، رياضيات سريعة، فك شفرات، ورسم وتخمين.</p>
+            <button class="btn primary-btn">إنشاء غرفة حفلة 🎮</button>
+          </div>
+
+          <!-- Card 2: Host Mystery -->
+          <div class="hero-card glass-card accent-card" onclick="app.startAsHost('mystery')">
+            <div class="card-badge">🕵️ قصة تفاعلية</div>
+            <div class="card-icon">🔍</div>
+            <h3>NOVA: THE CASE — Mystery Mode</h3>
+            <p>قضية #001: اختفاء الكأس! العب جولات مصغرة لفتح أدلة سرية ومناقشة التناقضات لكشف الجاني.</p>
+            <button class="btn accent-btn">بدء قضية جديدة 🔍</button>
+          </div>
+
+          <!-- Card 3: Join Mobile -->
+          <div class="hero-card glass-card" onclick="app.switchView('mobile')">
+            <div class="card-icon">📱</div>
+            <h3>الانضمام كلاعب</h3>
+            <p>إذا كانت الغرفة مفتوحة بالفعل على شاشة التلفزيون، ادخل من هنا واكتب رمز الغرفة.</p>
+            <button class="btn secondary-btn">ادخل رمز الغرفة 🔑</button>
+          </div>
+
+          <!-- Card 4: Full Multi Simulator -->
+          <div class="hero-card glass-card gold-card" onclick="app.switchView('simulator')">
+            <div class="card-icon">💻</div>
+            <h3>محاكي الاختبار السريع</h3>
+            <p>شاشة التلفزيون الرئيسي + 3 موبايلات للاعبين في نفس المتصفح للتجربة والمعاينة الفورية!</p>
+            <button class="btn gold-btn">تشغيل المحاكي المباشر 🚀</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== 2. HOST SCREEN (TV/LAPTOP DISPLAY) ==================== -->
+    <section id="view-host" class="app-view">
+      <div class="host-dashboard">
+        
+        <!-- Host Top Bar -->
+        <div class="host-header glass-panel">
+          <div class="room-info">
+            <span class="label">رمز الغرفة:</span>
+            <span class="room-code-badge" id="host-room-code">----</span>
+            <button class="btn secondary-sm" onclick="app.copyRoomCode()" title="نسخ الرمز">📋 نسخ</button>
+            <span class="game-mode-badge" id="host-game-mode">🏆 PARTY MODE</span>
+          </div>
+          
+          <div class="host-status" id="host-status-text">بانتظار انضمام اللاعبين...</div>
+
+          <div class="host-actions" style="display:flex; gap:8px;">
+            <button class="btn secondary-sm" id="btn-host-pause" onclick="app.togglePauseTimer()" title="إيقاف الموقت مؤقتاً">إيقاف ⏸️</button>
+            <button class="btn primary-sm" onclick="app.nextRound()" title="التخطي للجولة التالية">الجولة التالية ➡️</button>
+            <button class="btn danger-sm" onclick="app.resetRoom()">إعادة الغرفة 🔄</button>
+          </div>
+        </div>
+
+        <!-- Host Dynamic Content Canvas -->
+        <div class="host-main-stage grid-layout">
+
+          <!-- Left Column: Stage & Active Game -->
+          <div class="stage-container glass-panel">
+            
+            <!-- LOBBY STATE -->
+            <div id="host-stage-lobby" class="stage-view active">
+              <div class="lobby-welcome">
+                <h2>🚀 انضموا للعبة الآن!</h2>
+                <p>افتح الموقع واكتب كود الغرفة: <strong class="highlight-code" id="host-code-display" onclick="app.copyRoomCode()" style="cursor:pointer;" title="انقر للنسخ">----</strong></p>
+                <div class="players-joined-count">اللاعبين المتصلين: <span id="joined-count">0</span></div>
+              </div>
+              
+              <div class="players-grid-display" id="host-players-grid">
+                <!-- Joined players render here -->
+              </div>
+
+              <div class="lobby-controls" id="lobby-start-controls">
+                <button class="btn giant-btn primary-btn pulse" onclick="app.startSelectedGameMode()">
+                  🏆 انطلاق المعركة — START GAME!
+                </button>
+              </div>
+            </div>
+
+            <!-- ACTIVE GAME STAGE -->
+            <div id="host-stage-game" class="stage-view">
+              <div class="game-header-bar">
+                <h2 id="host-game-title">⚡ 1. TAP REACTION</h2>
+                <div class="round-counter" id="host-round-indicator">الجولة 1 / 8</div>
+                <div class="timer-box" id="host-timer-box">
+                  <span id="host-timer-val">15</span>s
+                </div>
+              </div>
+
+              <!-- Dynamic Game Rendering Canvas on Host -->
+              <div id="host-game-canvas" class="game-canvas">
+                <!-- Mini game host visualization injects here -->
+              </div>
+            </div>
+
+            <!-- MYSTERY CASE BOARD STAGE -->
+            <div id="host-stage-mystery" class="stage-view">
+              <div class="mystery-board-header">
+                <h2>🕵️ CASE #001: THE MISSING TROPHY — لوحة الأدلة والتحقيق</h2>
+                <div class="phase-badge" id="mystery-phase-tag">مرحلة جمع الأدلة</div>
+              </div>
+
+              <div class="case-board-grid">
+                <!-- Suspects Cards -->
+                <div class="suspects-row" id="host-suspects-row">
+                  <!-- Suspects injected via JS -->
+                </div>
+
+                <!-- Central Evidence Timeline Graph -->
+                <div class="evidence-graph glass-panel" id="host-evidence-graph">
+                  <h3>📜 شبكة الأدلة التي تم كشفها:</h3>
+                  <div class="evidence-nodes-list" id="host-evidence-nodes">
+                    <!-- Unlocked evidence nodes injected here -->
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- FINAL RESULTS / LEADERBOARD STAGE -->
+            <div id="host-stage-results" class="stage-view">
+              <div class="results-header">
+                <h1 class="trophy-bounce">🏆 النتائج النهائية 🏆</h1>
+                <p>انتهت المعركة وحان وقت تكريم الأبطال!</p>
+              </div>
+
+              <div class="podium-container" id="host-podium">
+                <!-- 1st, 2nd, 3rd Podium injected via JS -->
+              </div>
+
+              <div class="badges-section" id="host-badges">
+                <h3>🏅 أوسمة الجدارة (Badges)</h3>
+                <div class="badges-grid" id="host-badges-grid">
+                  <!-- Badges injected via JS -->
+                </div>
+              </div>
+
+              <div class="results-actions">
+                <button class="btn primary-btn" onclick="app.startSelectedGameMode()">لعب جولة جديدة 🔄</button>
+                <button class="btn secondary-btn" onclick="app.switchView('landing')">القائمة الرئيسية 🏠</button>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Right Column: Live Leaderboard Panel -->
+          <div class="leaderboard-panel glass-panel">
+            <h3>📊 قائمة المتصدرين (Live)</h3>
+            <div class="leaderboard-list" id="host-leaderboard">
+              <!-- Live players score items render here -->
+            </div>
+
+            <div class="game-log-box">
+              <h4>💬 سجل الأحداث</h4>
+              <div class="log-messages" id="host-game-log">
+                <div class="log-item">جاهز للبدء...</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== 3. PLAYER MOBILE SCREEN ==================== -->
+    <section id="view-mobile" class="app-view">
+      <div class="mobile-container glass-panel">
+
+        <!-- Mobile Login View -->
+        <div id="mobile-join-screen" class="mobile-screen active">
+          <div class="mobile-header">
+            <div class="mobile-logo">🎮 NOVA PARTY</div>
+            <h2>انضم للمباراة</h2>
+          </div>
+
+          <form id="join-form" onsubmit="event.preventDefault(); app.joinRoomFromMobile();">
+            <div id="mobile-join-error" style="display:none; background: rgba(239, 68, 68, 0.2); border: 1px solid var(--danger); color: #fca5a5; padding: 10px; border-radius: 8px; margin-bottom: 15px; font-size: 0.9rem; text-align: center;"></div>
+            
+            <div class="input-group">
+              <label>رمز الغرفة (Room Code)</label>
+              <input type="text" id="mobile-input-code" placeholder="1234" maxlength="4" value="1234" required style="text-transform:uppercase; letter-spacing:2px; font-weight:bold;">
+            </div>
+
+            <div class="input-group">
+              <label>اسم اللاعب</label>
+              <input type="text" id="mobile-input-name" placeholder="اكتب اسمك الشخصي هنا" maxlength="12" value="" required>
+            </div>
+
+            <div class="input-group">
+              <label>اختر الرمز والشخصية (Avatar & Title)</label>
+              <div class="avatar-picker" id="avatar-picker">
+                <div class="avatar-option selected" data-avatar="🐺" data-title="THE STRATEGIST">🐺</div>
+                <div class="avatar-option" data-avatar="🦊" data-title="SPEEDSTER">🦊</div>
+                <div class="avatar-option" data-avatar="🦁" data-title="BRAINIAC">🦁</div>
+                <div class="avatar-option" data-avatar="🦅" data-title="EAGLE EYE">🦅</div>
+                <div class="avatar-option" data-avatar="👑" data-title="CHAMPION">👑</div>
+                <div class="avatar-option" data-avatar="🔥" data-title="FIRE MASTER">🔥</div>
+              </div>
+            </div>
+
+            <button type="submit" class="btn giant-btn primary-btn full-width">انضمام الآن 🚀</button>
+          </form>
+        </div>
+
+        <!-- Mobile Waiting Lobby Screen -->
+        <div id="mobile-lobby-screen" class="mobile-screen">
+          <div class="player-card-display" id="mobile-player-card">
+            <!-- Player Avatar, Name, Title -->
+          </div>
+          <div class="waiting-spinner">
+            <div class="spinner"></div>
+            <p>أنت الآن في الغرفة! انظر إلى شاشة التلفزيون وبانتظار بدء الجيم...</p>
+          </div>
+        </div>
+
+        <!-- Mobile Active Game Controller Screen -->
+        <div id="mobile-game-screen" class="mobile-screen">
+          <div class="mobile-game-header">
+            <span class="player-mini-score" id="mobile-score-display">⭐ 0 XP</span>
+            <span class="mobile-timer" id="mobile-timer-display">⏱️ 15s</span>
+          </div>
+
+          <!-- Dynamic Game Controller Container -->
+          <div id="mobile-game-controller" class="controller-stage">
+            <!-- Game touch controls inject here -->
+          </div>
+        </div>
+
+        <!-- Mobile Mystery Evidence / Accusation View -->
+        <div id="mobile-mystery-screen" class="mobile-screen">
+          <div class="mystery-mobile-header">
+            <h3>🕵️ ملف أدلتك الخاصة</h3>
+          </div>
+          <div class="unlocked-evidence-box" id="mobile-evidence-list">
+            <!-- Private clues render here -->
+          </div>
+
+          <div id="mobile-accusation-panel" class="accusation-box hidden">
+            <h3>⚖️ الاتهام النهائي: من هو الجاني؟</h3>
+            <div class="suspect-select-grid" id="mobile-suspects-select"></div>
+            
+            <label>ما هو الدافع / السبب؟</label>
+            <select id="mobile-motive-select" class="styled-select">
+              <option value="timeline">كذب بشأن التوقيت 🕒</option>
+              <option value="opportunity">كان الوحيد القادر على الدخول 🚪</option>
+              <option value="motive">لديه دافع الانتقام ورغبة الفوز 🏆</option>
+            </select>
+
+            <button class="btn accent-btn full-width" onclick="app.submitFinalAccusation()">إرسال الاتهام النهائي ⚖️</button>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ==================== 4. MULTI-PLAYER SIMULATOR (DEV & DEMO) ==================== -->
+    <section id="view-simulator" class="app-view">
+      <div class="simulator-layout">
+        <div class="sim-header glass-panel">
+          <h2>💻 محاكي متعدد اللاعبين (NOVA Multi-Player Testbed)</h2>
+          <p>شاشة Host الرئيسية على اليسار، ومحاكاة 3 موبايلات حية على اليمين!</p>
+          <div class="sim-actions">
+            <button class="btn primary-btn" onclick="app.simQuickSetup()">إعداد سريع لـ 3 لاعبين ⚡</button>
+            <button class="btn secondary-btn" onclick="app.startSelectedGameMode()">بدء اللعبة في المحاكي 🚀</button>
+          </div>
+        </div>
+
+        <div class="sim-grid">
+          <!-- Left: Big Host View -->
+          <div class="sim-host-pane glass-panel">
+            <div class="sim-pane-title">🖥️ شاشة العرض الرئيسية (TV Host)</div>
+            <iframe id="sim-frame-host" class="sim-frame" src="about:blank"></iframe>
+          </div>
+
+          <!-- Right: 3 Mobile Player Viewports -->
+          <div class="sim-players-pane">
+            <div class="sim-mobile-frame glass-panel">
+              <div class="sim-pane-title">📱 لاعب 1: Mohamed (🐺)</div>
+              <iframe id="sim-frame-p1" class="sim-frame" src="about:blank"></iframe>
+            </div>
+            
+            <div class="sim-mobile-frame glass-panel">
+              <div class="sim-pane-title">📱 لاعب 2: Ahmed (🦊)</div>
+              <iframe id="sim-frame-p2" class="sim-frame" src="about:blank"></iframe>
+            </div>
+
+            <div class="sim-mobile-frame glass-panel">
+              <div class="sim-pane-title">📱 لاعب 3: Youssef (🦁)</div>
+              <iframe id="sim-frame-p3" class="sim-frame" src="about:blank"></iframe>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Sound FX / Web Audio Initialization Script -->
+  <script src="js/audio.js"></script>
+  <!-- State Management & Realtime Sync Engine -->
+  <script src="js/state.js"></script>
+  <!-- Mini Games Engine Pack -->
+  <script src="js/games.js"></script>
+  <!-- Mystery Case Engine -->
+  <script src="js/mystery.js"></script>
+  <!-- Main App Controller -->
+  <script src="js/app.js"></script>
+</body>
+</html>
