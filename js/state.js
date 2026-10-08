@@ -24,122 +24,74 @@ class GameStateStore {
 
     this.listeners = [];
     
-    // PeerJS WebRTC P2P Network Setup
-    this.peer = null;
-    this.hostConn = null;
-    this.connections = []; // For Host: array of player connections
+    // MQTT WebSocket Client Setup
+    this.mqttClient = null;
+    this.mqttTopic = '';
 
     this.loadActiveRoomFromStorage();
     this.initRealtime();
-    this.initPeerJS();
+    this.initMQTT();
   }
 
   generateRoomCode() {
     return '1234';
   }
 
-  getPeerHostId(code) {
+  getMQTTTopic(code) {
     const clean = (code || '1234').toUpperCase();
-    return `nova-party-room-${clean}`;
+    return `nova_party_room_bus_${clean}`;
   }
 
-  initPeerJS() {
-    if (!window.Peer) {
-      console.warn("PeerJS SDK not loaded yet");
+  initMQTT() {
+    if (!window.mqtt) {
+      console.warn("MQTT SDK not loaded yet");
       return;
     }
 
-    const isHost = sessionStorage.getItem('nova_is_host') === 'true';
-
     try {
-      if (isHost) {
-        // Initialize as Host Authority
-        const hostPeerId = this.getPeerHostId(this.roomCode);
-        this.peer = new Peer(hostPeerId);
+      this.mqttTopic = this.getMQTTTopic(this.roomCode);
+      // Connect to public high-speed MQTT WebSocket broker
+      this.mqttClient = window.mqtt.connect('wss://broker.emqx.io:8084/mqtt', {
+        clientId: 'nova_' + this.getSelfId() + '_' + Math.random().toString(36).substring(2, 7),
+        keepalive: 30,
+        reconnectPeriod: 2000
+      });
 
-        this.peer.on('open', (id) => {
-          console.log('📡 [PeerJS Host] Opened peer room ID:', id);
-          this.addLog(`📡 [شبكة] الغرفة جاهزة للاتصال الحقيقي: ${this.roomCode}`);
+      this.mqttClient.on('connect', () => {
+        console.log('📡 [MQTT Realtime] Connected to Broker!');
+        this.addLog(`📡 [شبكة] تم الاتصال بالخادم الرئيسي الموحد: الغرفة ${this.roomCode}`);
+        
+        this.mqttClient.subscribe(this.mqttTopic, (err) => {
+          if (!err) {
+            console.log('✅ Subscribed to MQTT topic:', this.mqttTopic);
+            
+            // If player was already joined, re-send join request on connect
+            const myDataRaw = sessionStorage.getItem('nova_joined_player');
+            if (myDataRaw && sessionStorage.getItem('nova_is_host') !== 'true') {
+              try {
+                const myPlayer = JSON.parse(myDataRaw);
+                this.broadcast('PLAYER_JOIN_REQUEST', myPlayer);
+              } catch (e) {}
+            }
+          }
         });
+      });
 
-        this.peer.on('connection', (conn) => {
-          console.log('📱 [PeerJS Host] Incoming player connection:', conn.peer);
-          this.connections.push(conn);
-
-          conn.on('data', (data) => {
-            this.handleIncomingMessage(data);
-          });
-
-          conn.on('close', () => {
-            this.connections = this.connections.filter(c => c !== conn);
-          });
-
-          // Send current state to newly connected player
-          conn.on('open', () => {
-            conn.send({
-              action: 'ROOM_STATE_SYNC',
-              payload: {
-                players: this.players,
-                roomCode: this.roomCode,
-                currentPhase: this.currentPhase,
-                currentRound: this.currentRound,
-                activeGameIndex: this.activeGameIndex
-              }
-            });
-          });
-        });
-
-        this.peer.on('error', (err) => {
-          console.warn('PeerJS Host Error:', err);
-        });
-
-      } else {
-        // Initialize as Mobile Client
-        this.peer = new Peer();
-        this.peer.on('open', (id) => {
-          console.log('📱 [PeerJS Client] Mobile Peer ID:', id);
-          this.connectToHostPeer();
-        });
-
-        this.peer.on('error', (err) => {
-          console.warn('PeerJS Client Error:', err);
-        });
-      }
-    } catch (e) {
-      console.warn('PeerJS Init Error:', e);
-    }
-  }
-
-  connectToHostPeer() {
-    if (!this.peer || sessionStorage.getItem('nova_is_host') === 'true') return;
-    
-    const hostPeerId = this.getPeerHostId(this.roomCode);
-    console.log('📱 Connecting to Host Peer:', hostPeerId);
-    
-    this.hostConn = this.peer.connect(hostPeerId);
-    
-    this.hostConn.on('open', () => {
-      console.log('✅ Connected to Host Peer!');
-      const myDataRaw = sessionStorage.getItem('nova_joined_player');
-      if (myDataRaw) {
+      this.mqttClient.on('message', (topic, message) => {
         try {
-          const myPlayer = JSON.parse(myDataRaw);
-          this.hostConn.send({
-            action: 'PLAYER_JOIN_REQUEST',
-            payload: myPlayer
-          });
+          const data = JSON.parse(message.toString());
+          if (data && data.senderId !== this.getSelfId()) {
+            this.handleIncomingMessage(data);
+          }
         } catch (e) {}
-      }
-    });
+      });
 
-    this.hostConn.on('data', (data) => {
-      this.handleIncomingMessage(data);
-    });
-
-    this.hostConn.on('close', () => {
-      console.warn('Host connection closed, reconnecting in 3s...');
-      setTimeout(() => this.connectToHostPeer(), 3000);
-    });
+      this.mqttClient.on('error', (err) => {
+        console.warn('MQTT Client Error:', err);
+      });
+    } catch (e) {
+      console.warn('MQTT Init Error:', e);
+    }
   }
 
   loadActiveRoomFromStorage() {
@@ -194,7 +146,7 @@ class GameStateStore {
     sessionStorage.setItem('nova_room_code', this.roomCode);
 
     this.saveActiveRoomToStorage();
-    this.initPeerJS();
+    this.initMQTT();
 
     this.broadcast('ROOM_CREATED', {
       roomCode: this.roomCode,
@@ -231,31 +183,10 @@ class GameStateStore {
   broadcast(action, payload) {
     const message = { action, payload, senderId: this.getSelfId(), timestamp: Date.now() };
 
-    // Broadcast over PeerJS WebRTC P2P
-    if (sessionStorage.getItem('nova_is_host') === 'true') {
-      // Host sends to all connected player devices
-      this.connections.forEach(conn => {
-        if (conn) {
-          try {
-            if (conn.open) {
-              conn.send(message);
-            } else {
-              conn.once('open', () => {
-                try { conn.send(message); } catch (e) {}
-              });
-            }
-          } catch (e) {}
-        }
-      });
-    } else if (this.hostConn) {
+    // Broadcast over MQTT WebSockets across the internet
+    if (this.mqttClient && this.mqttClient.connected) {
       try {
-        if (this.hostConn.open) {
-          this.hostConn.send(message);
-        } else {
-          this.hostConn.once('open', () => {
-            try { this.hostConn.send(message); } catch (e) {}
-          });
-        }
+        this.mqttClient.publish(this.mqttTopic, JSON.stringify(message));
       } catch (e) {}
     }
 
@@ -366,10 +297,7 @@ class GameStateStore {
     // 1. Add locally
     this.addPlayer(player);
 
-    // 2. Connect to Host Peer via WebRTC P2P
-    this.connectToHostPeer();
-
-    // 3. Broadcast join request
+    // 2. Broadcast join request to room topic over MQTT WebSockets
     this.broadcast('PLAYER_JOIN_REQUEST', player);
     return { success: true, player };
   }
