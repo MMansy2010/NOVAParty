@@ -24,12 +24,75 @@ class GameStateStore {
 
     this.listeners = [];
     
+    // Firebase Realtime DB Setup
+    this.db = null;
+    this.roomRef = null;
+
+    this.initFirebase();
     this.loadActiveRoomFromStorage();
     this.initRealtime();
   }
 
   generateRoomCode() {
     return '1234';
+  }
+
+  initFirebase() {
+    try {
+      if (window.firebase && !window.firebase.apps.length) {
+        // Public Firebase Realtime DB Endpoint for NOVA Party Multi-Device Sync
+        const firebaseConfig = {
+          databaseURL: "https://nova-party-game-default-rtdb.firebaseio.com"
+        };
+        window.firebase.initializeApp(firebaseConfig);
+      }
+      if (window.firebase && window.firebase.database) {
+        this.db = window.firebase.database();
+        console.log("🔥 Firebase Realtime Database Initialized!");
+        this.subscribeToFirebaseRoom(this.roomCode);
+      }
+    } catch (err) {
+      console.warn("Firebase Init Fallback:", err);
+    }
+  }
+
+  subscribeToFirebaseRoom(code) {
+    if (!this.db || !code) return;
+    const roomPath = `rooms/${code.toUpperCase()}`;
+    if (this.roomRef) {
+      this.roomRef.off();
+    }
+    this.roomRef = this.db.ref(roomPath);
+    this.roomRef.on('value', (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        this.syncFromRemoteData(data);
+      }
+    });
+  }
+
+  syncFromRemoteData(data) {
+    if (!data) return;
+    const action = data.lastAction || 'ROOM_STATE_SYNC';
+    const payload = data.lastPayload || null;
+
+    if (data.roomCode) this.roomCode = data.roomCode;
+    if (data.gameMode) this.gameMode = data.gameMode;
+    if (data.currentPhase) this.currentPhase = data.currentPhase;
+    if (data.currentRound) this.currentRound = data.currentRound;
+    if (data.activeGameIndex !== undefined) this.activeGameIndex = data.activeGameIndex;
+    if (data.hostId) this.hostId = data.hostId;
+    
+    if (data.players) {
+      this.players = Object.values(data.players);
+    }
+
+    if (data.logs && Array.isArray(data.logs)) {
+      this.logs = data.logs;
+    }
+
+    this.saveActiveRoomToStorage();
+    this.notifyListeners(action, payload);
   }
 
   loadActiveRoomFromStorage() {
@@ -69,7 +132,7 @@ class GameStateStore {
   }
 
   createRoom(gameMode = 'party') {
-    this.roomCode = this.generateRoomCode();
+    this.roomCode = '1234';
     this.gameMode = gameMode;
     this.currentPhase = 'lobby';
     this.players = [];
@@ -83,8 +146,25 @@ class GameStateStore {
     sessionStorage.setItem('nova_is_host', 'true');
     sessionStorage.setItem('nova_room_code', this.roomCode);
 
-    this.saveActiveRoomToStorage();
+    const roomData = {
+      roomCode: this.roomCode,
+      gameMode: this.gameMode,
+      currentPhase: this.currentPhase,
+      players: {},
+      hostId: this.hostId,
+      activeGameIndex: 0,
+      currentRound: 1,
+      logs: this.logs,
+      lastAction: 'ROOM_CREATED',
+      updatedAt: Date.now()
+    };
 
+    if (this.db) {
+      this.db.ref(`rooms/${this.roomCode}`).set(roomData);
+      this.subscribeToFirebaseRoom(this.roomCode);
+    }
+
+    this.saveActiveRoomToStorage();
     this.broadcast('ROOM_CREATED', {
       roomCode: this.roomCode,
       gameMode: this.gameMode,
@@ -119,6 +199,26 @@ class GameStateStore {
 
   broadcast(action, payload) {
     const message = { action, payload, senderId: this.getSelfId(), timestamp: Date.now() };
+    
+    // Update Firebase if connected
+    if (this.db && this.roomCode) {
+      const updateData = {
+        lastAction: action,
+        lastPayload: payload || null,
+        updatedAt: Date.now()
+      };
+
+      if (action === 'ROUND_STARTED') {
+        updateData.currentPhase = 'in_game';
+        updateData.activeGameIndex = payload.gameIndex;
+        updateData.currentRound = payload.currentRound || (payload.gameIndex + 1);
+      } else if (action === 'ROUND_FINISHED') {
+        updateData.currentPhase = 'summary';
+      }
+
+      this.db.ref(`rooms/${this.roomCode}`).update(updateData);
+    }
+
     if (this.channel) {
       try {
         this.channel.postMessage(message);
@@ -144,16 +244,8 @@ class GameStateStore {
         this.saveActiveRoomToStorage();
         break;
       case 'PLAYER_JOIN_REQUEST':
-        // Only Host/Authority adds player and broadcasts updated complete list
         this.addPlayer(payload);
         this.saveActiveRoomToStorage();
-        this.broadcast('ROOM_STATE_SYNC', {
-          players: this.players,
-          roomCode: this.roomCode,
-          currentPhase: this.currentPhase,
-          currentRound: this.currentRound,
-          activeGameIndex: this.activeGameIndex
-        });
         break;
       case 'ROOM_STATE_SYNC':
         if (payload && payload.players) {
@@ -168,6 +260,9 @@ class GameStateStore {
       case 'PLAYER_KICK':
         this.players = this.players.filter(p => p.id !== payload.playerId);
         this.addLog(`🛑 تم استبعاد اللاعب من الغرفة.`);
+        if (this.db) {
+          this.db.ref(`rooms/${this.roomCode}/players/${payload.playerId}`).remove();
+        }
         this.saveActiveRoomToStorage();
         break;
       case 'ROUND_STARTED':
@@ -206,13 +301,11 @@ class GameStateStore {
     const cleanCode = (enteredCode || '').trim().toUpperCase();
     const targetCode = (this.roomCode || '1234').toUpperCase();
     
-    // Always accept 1234 or current roomCode or empty (which defaults to 1234)
     if (cleanCode && cleanCode !== '1234' && cleanCode !== targetCode) {
       return { success: false, message: `رمز الغرفة (${cleanCode}) غير صحيح! رمز الغرفة الموحد هو: 1234` };
     }
 
     this.roomCode = '1234';
-
     const playerId = this.getSelfId();
     const player = {
       id: playerId,
@@ -224,7 +317,18 @@ class GameStateStore {
 
     sessionStorage.setItem('nova_joined_player', JSON.stringify(player));
     
-    // Broadcast join request to room authority
+    // 1. Add locally
+    this.addPlayer(player);
+
+    // 2. Write to Firebase Realtime Database under rooms/1234/players/{playerId}
+    if (this.db) {
+      this.db.ref(`rooms/${this.roomCode}/players/${playerId}`).set(player);
+      this.db.ref(`rooms/${this.roomCode}/lastAction`).set('PLAYER_JOINED');
+      this.db.ref(`rooms/${this.roomCode}/logs`).set(this.logs);
+      this.subscribeToFirebaseRoom(this.roomCode);
+    }
+
+    // 3. Broadcast locally
     this.broadcast('PLAYER_JOIN_REQUEST', player);
     return { success: true, player };
   }
@@ -252,6 +356,9 @@ class GameStateStore {
     if (p) {
       p.score += points;
       this.addLog(`⭐ حصل ${p.name} على +${points} XP (المجموع: ${p.score})`);
+      if (this.db) {
+        this.db.ref(`rooms/${this.roomCode}/players/${playerId}/score`).set(p.score);
+      }
     }
     this.players.sort((a, b) => b.score - a.score);
   }
@@ -281,6 +388,11 @@ class GameStateStore {
     this.unlockedEvidence = {};
     this.accusations = {};
     this.logs = ['[نظام] تم إعادة ضبط الغرفة.'];
+    
+    if (this.db) {
+      this.db.ref(`rooms/${this.roomCode}`).remove();
+    }
+    
     this.saveActiveRoomToStorage();
     this.broadcast('ROOM_STATE_SYNC', {
       players: this.players,
@@ -293,4 +405,5 @@ class GameStateStore {
 }
 
 const stateStore = new GameStateStore();
+
 
