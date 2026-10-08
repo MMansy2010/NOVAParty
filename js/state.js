@@ -24,75 +24,122 @@ class GameStateStore {
 
     this.listeners = [];
     
-    // Firebase Realtime DB Setup
-    this.db = null;
-    this.roomRef = null;
+    // PeerJS WebRTC P2P Network Setup
+    this.peer = null;
+    this.hostConn = null;
+    this.connections = []; // For Host: array of player connections
 
-    this.initFirebase();
     this.loadActiveRoomFromStorage();
     this.initRealtime();
+    this.initPeerJS();
   }
 
   generateRoomCode() {
     return '1234';
   }
 
-  initFirebase() {
+  getPeerHostId(code) {
+    const clean = (code || '1234').toUpperCase();
+    return `nova-party-room-${clean}`;
+  }
+
+  initPeerJS() {
+    if (!window.Peer) {
+      console.warn("PeerJS SDK not loaded yet");
+      return;
+    }
+
+    const isHost = sessionStorage.getItem('nova_is_host') === 'true';
+
     try {
-      if (window.firebase && !window.firebase.apps.length) {
-        // Public Firebase Realtime DB Endpoint for NOVA Party Multi-Device Sync
-        const firebaseConfig = {
-          databaseURL: "https://nova-party-game-default-rtdb.firebaseio.com"
-        };
-        window.firebase.initializeApp(firebaseConfig);
+      if (isHost) {
+        // Initialize as Host Authority
+        const hostPeerId = this.getPeerHostId(this.roomCode);
+        this.peer = new Peer(hostPeerId);
+
+        this.peer.on('open', (id) => {
+          console.log('📡 [PeerJS Host] Opened peer room ID:', id);
+          this.addLog(`📡 [شبكة] الغرفة جاهزة للاتصال الحقيقي: ${this.roomCode}`);
+        });
+
+        this.peer.on('connection', (conn) => {
+          console.log('📱 [PeerJS Host] Incoming player connection:', conn.peer);
+          this.connections.push(conn);
+
+          conn.on('data', (data) => {
+            this.handleIncomingMessage(data);
+          });
+
+          conn.on('close', () => {
+            this.connections = this.connections.filter(c => c !== conn);
+          });
+
+          // Send current state to newly connected player
+          conn.on('open', () => {
+            conn.send({
+              action: 'ROOM_STATE_SYNC',
+              payload: {
+                players: this.players,
+                roomCode: this.roomCode,
+                currentPhase: this.currentPhase,
+                currentRound: this.currentRound,
+                activeGameIndex: this.activeGameIndex
+              }
+            });
+          });
+        });
+
+        this.peer.on('error', (err) => {
+          console.warn('PeerJS Host Error:', err);
+        });
+
+      } else {
+        // Initialize as Mobile Client
+        this.peer = new Peer();
+        this.peer.on('open', (id) => {
+          console.log('📱 [PeerJS Client] Mobile Peer ID:', id);
+          this.connectToHostPeer();
+        });
+
+        this.peer.on('error', (err) => {
+          console.warn('PeerJS Client Error:', err);
+        });
       }
-      if (window.firebase && window.firebase.database) {
-        this.db = window.firebase.database();
-        console.log("🔥 Firebase Realtime Database Initialized!");
-        this.subscribeToFirebaseRoom(this.roomCode);
-      }
-    } catch (err) {
-      console.warn("Firebase Init Fallback:", err);
+    } catch (e) {
+      console.warn('PeerJS Init Error:', e);
     }
   }
 
-  subscribeToFirebaseRoom(code) {
-    if (!this.db || !code) return;
-    const roomPath = `rooms/${code.toUpperCase()}`;
-    if (this.roomRef) {
-      this.roomRef.off();
-    }
-    this.roomRef = this.db.ref(roomPath);
-    this.roomRef.on('value', (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        this.syncFromRemoteData(data);
+  connectToHostPeer() {
+    if (!this.peer || sessionStorage.getItem('nova_is_host') === 'true') return;
+    
+    const hostPeerId = this.getPeerHostId(this.roomCode);
+    console.log('📱 Connecting to Host Peer:', hostPeerId);
+    
+    this.hostConn = this.peer.connect(hostPeerId);
+    
+    this.hostConn.on('open', () => {
+      console.log('✅ Connected to Host Peer!');
+      const myDataRaw = sessionStorage.getItem('nova_joined_player');
+      if (myDataRaw) {
+        try {
+          const myPlayer = JSON.parse(myDataRaw);
+          this.hostConn.send({
+            action: 'PLAYER_JOIN_REQUEST',
+            payload: myPlayer
+          });
+        } catch (e) {}
       }
     });
-  }
 
-  syncFromRemoteData(data) {
-    if (!data) return;
-    const action = data.lastAction || 'ROOM_STATE_SYNC';
-    const payload = data.lastPayload || null;
+    this.hostConn.on('data', (data) => {
+      this.handleIncomingMessage(data);
+    });
 
-    if (data.roomCode) this.roomCode = data.roomCode;
-    if (data.gameMode) this.gameMode = data.gameMode;
-    if (data.currentPhase) this.currentPhase = data.currentPhase;
-    if (data.currentRound) this.currentRound = data.currentRound;
-    if (data.activeGameIndex !== undefined) this.activeGameIndex = data.activeGameIndex;
-    if (data.hostId) this.hostId = data.hostId;
-    
-    if (data.players) {
-      this.players = Object.values(data.players);
-    }
-
-    if (data.logs && Array.isArray(data.logs)) {
-      this.logs = data.logs;
-    }
-
-    this.saveActiveRoomToStorage();
-    this.notifyListeners(action, payload);
+    this.hostConn.on('close', () => {
+      console.warn('Host connection closed, reconnecting in 3s...');
+      setTimeout(() => this.connectToHostPeer(), 3000);
+    });
   }
 
   loadActiveRoomFromStorage() {
@@ -146,25 +193,9 @@ class GameStateStore {
     sessionStorage.setItem('nova_is_host', 'true');
     sessionStorage.setItem('nova_room_code', this.roomCode);
 
-    const roomData = {
-      roomCode: this.roomCode,
-      gameMode: this.gameMode,
-      currentPhase: this.currentPhase,
-      players: {},
-      hostId: this.hostId,
-      activeGameIndex: 0,
-      currentRound: 1,
-      logs: this.logs,
-      lastAction: 'ROOM_CREATED',
-      updatedAt: Date.now()
-    };
-
-    if (this.db) {
-      this.db.ref(`rooms/${this.roomCode}`).set(roomData);
-      this.subscribeToFirebaseRoom(this.roomCode);
-    }
-
     this.saveActiveRoomToStorage();
+    this.initPeerJS();
+
     this.broadcast('ROOM_CREATED', {
       roomCode: this.roomCode,
       gameMode: this.gameMode,
@@ -199,30 +230,23 @@ class GameStateStore {
 
   broadcast(action, payload) {
     const message = { action, payload, senderId: this.getSelfId(), timestamp: Date.now() };
-    
-    // Update Firebase if connected
-    if (this.db && this.roomCode) {
-      const updateData = {
-        lastAction: action,
-        lastPayload: payload || null,
-        updatedAt: Date.now()
-      };
 
-      if (action === 'ROUND_STARTED') {
-        updateData.currentPhase = 'in_game';
-        updateData.activeGameIndex = payload.gameIndex;
-        updateData.currentRound = payload.currentRound || (payload.gameIndex + 1);
-      } else if (action === 'ROUND_FINISHED') {
-        updateData.currentPhase = 'summary';
-      }
-
-      this.db.ref(`rooms/${this.roomCode}`).update(updateData);
+    // Broadcast over PeerJS WebRTC P2P
+    if (sessionStorage.getItem('nova_is_host') === 'true') {
+      // Host sends to all connected player devices
+      this.connections.forEach(conn => {
+        if (conn && conn.open) {
+          try { conn.send(message); } catch (e) {}
+        }
+      });
+    } else if (this.hostConn && this.hostConn.open) {
+      // Mobile client sends to Host
+      try { this.hostConn.send(message); } catch (e) {}
     }
 
+    // Local Tab BroadcastChannel fallback
     if (this.channel) {
-      try {
-        this.channel.postMessage(message);
-      } catch (e) {}
+      try { this.channel.postMessage(message); } catch (e) {}
     }
     try {
       localStorage.setItem('nova_party_cross_event', JSON.stringify(message));
@@ -246,6 +270,16 @@ class GameStateStore {
       case 'PLAYER_JOIN_REQUEST':
         this.addPlayer(payload);
         this.saveActiveRoomToStorage();
+        // Host broadcasts updated player state to ALL players
+        if (sessionStorage.getItem('nova_is_host') === 'true') {
+          this.broadcast('ROOM_STATE_SYNC', {
+            players: this.players,
+            roomCode: this.roomCode,
+            currentPhase: this.currentPhase,
+            currentRound: this.currentRound,
+            activeGameIndex: this.activeGameIndex
+          });
+        }
         break;
       case 'ROOM_STATE_SYNC':
         if (payload && payload.players) {
@@ -260,9 +294,6 @@ class GameStateStore {
       case 'PLAYER_KICK':
         this.players = this.players.filter(p => p.id !== payload.playerId);
         this.addLog(`🛑 تم استبعاد اللاعب من الغرفة.`);
-        if (this.db) {
-          this.db.ref(`rooms/${this.roomCode}/players/${payload.playerId}`).remove();
-        }
         this.saveActiveRoomToStorage();
         break;
       case 'ROUND_STARTED':
@@ -320,15 +351,10 @@ class GameStateStore {
     // 1. Add locally
     this.addPlayer(player);
 
-    // 2. Write to Firebase Realtime Database under rooms/1234/players/{playerId}
-    if (this.db) {
-      this.db.ref(`rooms/${this.roomCode}/players/${playerId}`).set(player);
-      this.db.ref(`rooms/${this.roomCode}/lastAction`).set('PLAYER_JOINED');
-      this.db.ref(`rooms/${this.roomCode}/logs`).set(this.logs);
-      this.subscribeToFirebaseRoom(this.roomCode);
-    }
+    // 2. Connect to Host Peer via WebRTC P2P
+    this.connectToHostPeer();
 
-    // 3. Broadcast locally
+    // 3. Broadcast join request
     this.broadcast('PLAYER_JOIN_REQUEST', player);
     return { success: true, player };
   }
@@ -356,9 +382,6 @@ class GameStateStore {
     if (p) {
       p.score += points;
       this.addLog(`⭐ حصل ${p.name} على +${points} XP (المجموع: ${p.score})`);
-      if (this.db) {
-        this.db.ref(`rooms/${this.roomCode}/players/${playerId}/score`).set(p.score);
-      }
     }
     this.players.sort((a, b) => b.score - a.score);
   }
@@ -388,11 +411,6 @@ class GameStateStore {
     this.unlockedEvidence = {};
     this.accusations = {};
     this.logs = ['[نظام] تم إعادة ضبط الغرفة.'];
-    
-    if (this.db) {
-      this.db.ref(`rooms/${this.roomCode}`).remove();
-    }
-    
     this.saveActiveRoomToStorage();
     this.broadcast('ROOM_STATE_SYNC', {
       players: this.players,
