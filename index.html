@@ -35,8 +35,13 @@
       </button>
     </div>
 
-    <div class="sound-toggle" onclick="audioEngine.toggleMute()">
-      <span id="sound-icon">🔊</span>
+    <div style="display:flex; align-items:center; gap:12px;">
+      <div class="firebase-status-badge glass-card" style="padding:6px 14px; font-size:0.8rem; border-radius:20px; display:flex; align-items:center; gap:6px; font-weight:bold;">
+        🔥 <span style="color:#f59e0b;">جاري الاتصال... 🟡</span>
+      </div>
+      <div class="sound-toggle" onclick="audioEngine.toggleMute()">
+        <span id="sound-icon">🔊</span>
+      </div>
     </div>
   </header>
 
@@ -45,9 +50,9 @@
     <!-- ==================== 1. LANDING SCREEN ==================== -->
     <section id="view-landing" class="app-view active">
       <div class="hero-container">
-        <div class="hero-badge">⚡ لعبة التحديات والتحقيق الجماعية</div>
+        <div class="hero-badge">⚡ منصة التحديات والألعاب المباشرة عبر الشبكات والفايربيز</div>
         <h1 class="hero-title">NOVA <span class="gradient-text">PARTY</span></h1>
-        <p class="hero-subtitle">افتح الموقع من اللابتوب أو التلفزيون، ويدخل الجميع من موبايلاتهم برمز الغرفة لخوض أشرس المنافسات وفك أعقد القضايا!</p>
+        <p class="hero-subtitle">افتح الموقع من اللابتوب أو الشاشة الرئيسية، ويدخل الجميع مباشرة من موبايلاتهم برمز الغرفة أو رابط مباشر لخوض أشرس المنافسات وفك أعقد القضايا!</p>
 
         <div class="hero-cards">
           <!-- Card 1: Host Party -->
@@ -92,14 +97,15 @@
         
         <!-- Host Top Bar -->
         <div class="host-header glass-panel">
-          <div class="room-info">
+          <div class="room-info" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
             <span class="label">رمز الغرفة:</span>
             <span class="room-code-badge" id="host-room-code">----</span>
-            <button class="btn secondary-sm" onclick="app.copyRoomCode()" title="نسخ الرمز">📋 نسخ</button>
+            <button class="btn secondary-sm" onclick="app.copyRoomCode()" title="نسخ الرمز">📋 نسخ الرمز</button>
+            <button class="btn accent-sm" onclick="app.copyRoomLink()" title="نسخ رابط مباشر للموبايل">🔗 رابط الموبايل</button>
             <span class="game-mode-badge" id="host-game-mode">🏆 PARTY MODE</span>
           </div>
           
-          <div class="host-status" id="host-status-text">بانتظار انضمام اللاعبين...</div>
+          <div class="host-status" id="host-status-text">بانتظار انضمام اللاعبين عبر الشبكة...</div>
 
           <div class="host-actions" style="display:flex; gap:8px;">
             <button class="btn secondary-sm" id="btn-host-pause" onclick="app.togglePauseTimer()" title="إيقاف الموقت مؤقتاً">إيقاف ⏸️</button>
@@ -118,7 +124,19 @@
             <div id="host-stage-lobby" class="stage-view active">
               <div class="lobby-welcome">
                 <h2>🚀 انضموا للعبة الآن!</h2>
-                <p>افتح الموقع واكتب كود الغرفة: <strong class="highlight-code" id="host-code-display" onclick="app.copyRoomCode()" style="cursor:pointer;" title="انقر للنسخ">----</strong></p>
+                <p>افتح الموقع من أي موبايل واكتب كود الغرفة: <strong class="highlight-code" id="host-code-display" onclick="app.copyRoomCode()" style="cursor:pointer;" title="انقر لنسخ الكود">----</strong></p>
+                
+                <div style="display:flex; justify-content:center; align-items:center; gap:20px; flex-wrap:wrap; margin:16px 0;">
+                  <div style="text-align:center;">
+                    <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:6px;">امسح الكود بالموبايل للانضمام الفوري 📱</p>
+                    <img id="host-qr-code-img" src="" alt="QR Code" style="width:120px; height:120px; border-radius:12px; border:2px solid var(--accent); background:white; padding:4px;">
+                  </div>
+                  <div style="display:flex; flex-direction:column; gap:8px;">
+                    <button class="btn secondary-btn" onclick="app.copyRoomLink()">🔗 نسخ رابط الغرفة المباشر</button>
+                    <button class="btn secondary-btn" onclick="app.copyRoomCode()">📋 نسخ كود الغرفة (4 أرقام)</button>
+                  </div>
+                </div>
+
                 <div class="players-joined-count">اللاعبين المتصلين: <span id="joined-count">0</span></div>
               </div>
               
@@ -225,7 +243,7 @@
         <div id="mobile-join-screen" class="mobile-screen active">
           <div class="mobile-header">
             <div class="mobile-logo">🎮 NOVA PARTY</div>
-            <h2>انضم للمباراة</h2>
+            <h2>انضم للمباراة المباشرة</h2>
           </div>
 
           <form id="join-form" onsubmit="event.preventDefault(); app.joinRoomFromMobile();">
@@ -264,7 +282,7 @@
           </div>
           <div class="waiting-spinner">
             <div class="spinner"></div>
-            <p>أنت الآن في الغرفة! انظر إلى شاشة التلفزيون وبانتظار بدء الجيم...</p>
+            <p>أنت الآن في الغرفة المباشرة! انظر إلى شاشة التلفزيون وبانتظار بدء الجيم...</p>
           </div>
         </div>
 
@@ -352,6 +370,7 @@
 
   <!-- Firebase Realtime Database SDK for Multi-Device Sync -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
   <!-- Sound FX / Web Audio Initialization Script -->
   <script src="js/audio.js"></script>

@@ -7,10 +7,35 @@ class NovaApp {
 
   init() {
     this.setupAvatarPicker();
+    this.setupAudioUnlock();
+    this.checkUrlParameters();
     stateStore.subscribe((action, payload, state) => this.onStateChange(action, payload, state));
     this.updateHostHeaderInfo();
     this.renderHostPlayersGrid();
     this.renderHostLeaderboard();
+    this.updateFirebaseStatusBadge(stateStore.firebaseConnected);
+  }
+
+  setupAudioUnlock() {
+    const unlock = () => {
+      audioEngine.init();
+      document.removeEventListener('click', unlock);
+      document.removeEventListener('touchstart', unlock);
+    };
+    document.addEventListener('click', unlock);
+    document.addEventListener('touchstart', unlock);
+  }
+
+  checkUrlParameters() {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const roomParam = params.get('room');
+      if (roomParam) {
+        const clean = roomParam.trim().toUpperCase();
+        stateStore.roomCode = clean;
+        this.switchView('mobile');
+      }
+    } catch (e) {}
   }
 
   switchView(viewName) {
@@ -56,11 +81,17 @@ class NovaApp {
     const codeBadge = document.getElementById('host-room-code');
     const displayCode = document.getElementById('host-code-display');
     const modeTag = document.getElementById('host-game-mode');
+    const qrImg = document.getElementById('host-qr-code-img');
 
     if (codeBadge) codeBadge.textContent = stateStore.roomCode;
     if (displayCode) displayCode.textContent = stateStore.roomCode;
     if (modeTag) {
       modeTag.textContent = stateStore.gameMode === 'party' ? '🏆 PARTY MODE' : '🕵️ MYSTERY MODE (CASE #001)';
+    }
+
+    if (qrImg && stateStore.roomCode) {
+      const joinUrl = window.location.origin + window.location.pathname + '?room=' + stateStore.roomCode;
+      qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(joinUrl)}`;
     }
   }
 
@@ -71,6 +102,17 @@ class NovaApp {
       alert(`تم نسخ رمز الغرفة: ${code}`);
     } else {
       alert(`رمز الغرفة هو: ${code}`);
+    }
+  }
+
+  copyRoomLink() {
+    const code = stateStore.roomCode || '1234';
+    const fullUrl = window.location.origin + window.location.pathname + '?room=' + code;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(fullUrl);
+      alert(`تم نسخ رابط الغرفة المباشر لجميع الأجهزة:\n${fullUrl}`);
+    } else {
+      alert(`رابط الغرفة:\n${fullUrl}`);
     }
   }
 
@@ -160,6 +202,11 @@ class NovaApp {
         ${playersHtml.length > 0 ? playersHtml : '<p style="color:var(--text-muted); text-align:center;">بانتظار انضمام باقي اللاعبين...</p>'}
       </div>
     `;
+
+    // Render Mystery evidence on mobile if mystery mode active
+    if (stateStore.gameMode === 'mystery' && window.mysteryEngine) {
+      window.mysteryEngine.renderMobileEvidenceList();
+    }
   }
 
   showJoinError(msg) {
@@ -332,12 +379,37 @@ class NovaApp {
     }
   }
 
+  updateFirebaseStatusBadge(isConnected) {
+    const badges = document.querySelectorAll('.firebase-status-badge');
+    badges.forEach(b => {
+      if (isConnected) {
+        b.innerHTML = '🔥 <span style="color:#10b981;">متصل بالفايربيز 🟢</span>';
+        b.style.borderColor = 'var(--accent)';
+      } else {
+        b.innerHTML = '🔥 <span style="color:#f59e0b;">جاري الاتصال... 🟡</span>';
+        b.style.borderColor = 'var(--gold)';
+      }
+    });
+  }
+
   onStateChange(action, payload, state) {
     this.updateHostHeaderInfo();
     this.renderHostPlayersGrid();
     this.renderHostLeaderboard();
     this.renderLogs();
     this.renderMobileLobby();
+
+    if (action === 'FIREBASE_STATUS_CHANGE') {
+      this.updateFirebaseStatusBadge(payload ? payload.connected : false);
+    }
+
+    if (action === 'DRAWING_SYNC' && stateStore.drawingData && window.DrawGuessGame) {
+      window.DrawGuessGame.renderRemoteDrawing(stateStore.drawingData);
+    }
+
+    if (action === 'EVIDENCE_UNLOCKED' && window.mysteryEngine) {
+      window.mysteryEngine.renderMobileEvidenceList();
+    }
 
     // Handle Mobile Screen State Transitions based on state changes
     if (action === 'ROUND_STARTED' || (stateStore.currentPhase === 'in_game' && action === 'ROOM_STATE_SYNC')) {
@@ -353,6 +425,21 @@ class NovaApp {
         const mobileController = document.getElementById('mobile-game-controller');
         const activeIdx = (payload && payload.gameIndex !== undefined) ? payload.gameIndex : stateStore.activeGameIndex;
         gameEngine.setupMobileController(activeIdx, mobileController);
+      }
+    }
+
+    if (action === 'MYSTERY_DISCUSSION_START' || action === 'MYSTERY_REVEAL_START') {
+      const hasJoined = sessionStorage.getItem('nova_joined_player');
+      if (this.currentView === 'mobile' || hasJoined) {
+        document.querySelectorAll('.mobile-screen').forEach(s => s.classList.remove('active'));
+        const mysteryScreen = document.getElementById('mobile-mystery-screen');
+        if (mysteryScreen) mysteryScreen.classList.add('active');
+        
+        const mobMystery = document.getElementById('mobile-accusation-panel');
+        if (mobMystery && window.mysteryEngine) {
+          mobMystery.classList.remove('hidden');
+          window.mysteryEngine.renderMobileSuspectSelect();
+        }
       }
     }
 
@@ -452,14 +539,15 @@ class NovaApp {
     const pId = stateStore.getSelfId();
     const p = stateStore.players.find(x => x.id === pId);
 
-    stateStore.broadcast('SUBMIT_ACCUSATION', {
+    const accusationData = {
       playerId: pId,
       playerName: p ? p.name : 'لاعب',
       culprit,
       motive
-    });
+    };
 
-    alert('تم تسليم الاتهام بنجاح! انتظر إعلان النتائج على شاشة التلفزيون.');
+    stateStore.submitAccusation(pId, accusationData);
+    alert('تم تسليم الاتهام بنجاح للفايربيز! انتظر إعلان النتائج على شاشة التلفزيون.');
   }
 }
 
@@ -470,4 +558,5 @@ window.app = app;
 window.addEventListener('DOMContentLoaded', () => {
   app.init();
 });
+
 

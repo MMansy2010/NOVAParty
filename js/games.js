@@ -22,6 +22,7 @@ class GameEngine {
   startRound(gameIndex, hostContainer, mobileContainer) {
     if (this.timerId) clearInterval(this.timerId);
     this.answersMap = {};
+    stateStore.clearRoundState();
 
     this.activeGame = this.games[gameIndex % this.games.length];
     audioEngine.playGo();
@@ -74,12 +75,7 @@ class GameEngine {
     this.answersMap[playerId] = data;
     
     audioEngine.playTap();
-    const p = stateStore.players.find(x => x.id === playerId);
-    stateStore.onAnswerReceived({
-      playerId,
-      playerName: p ? p.name : playerId,
-      summary: data.summary || 'تم تسجيل الإجابة'
-    });
+    stateStore.submitPlayerAnswer(playerId, data);
 
     if (this.activeGame.onAnswerReceived) {
       this.activeGame.onAnswerReceived(playerId, data);
@@ -570,12 +566,27 @@ class DrawGuessGame {
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     let isDrawing = false;
+    let syncTimeout = null;
+
+    const syncToFirebase = () => {
+      if (syncTimeout) clearTimeout(syncTimeout);
+      syncTimeout = setTimeout(() => {
+        const dataUrl = canvas.toDataURL();
+        stateStore.submitDrawing(stateStore.getSelfId(), dataUrl);
+      }, 100);
+    };
 
     const startDraw = (e) => {
       isDrawing = true;
       draw(e);
     };
-    const endDraw = () => { isDrawing = false; ctx.beginPath(); };
+    const endDraw = () => {
+      if (isDrawing) {
+        isDrawing = false;
+        ctx.beginPath();
+        syncToFirebase();
+      }
+    };
 
     const draw = (e) => {
       if (!isDrawing) return;
@@ -592,7 +603,7 @@ class DrawGuessGame {
       ctx.beginPath();
       ctx.moveTo(clientX - rect.left, clientY - rect.top);
 
-      // Sync drawing to host canvas if open
+      // Sync drawing to host canvas locally if open
       const hostCanvas = document.getElementById('host-draw-view');
       if (hostCanvas) {
         const hctx = hostCanvas.getContext('2d');
@@ -608,6 +619,24 @@ class DrawGuessGame {
     canvas.addEventListener('touchmove', draw);
   }
 
+  static renderRemoteDrawing(drawingPayload) {
+    const hostCanvas = document.getElementById('host-draw-view');
+    if (!hostCanvas || !drawingPayload) return;
+    const hctx = hostCanvas.getContext('2d');
+    
+    if (!drawingPayload.data) {
+      hctx.clearRect(0, 0, hostCanvas.width, hostCanvas.height);
+      return;
+    }
+
+    const img = new Image();
+    img.onload = () => {
+      hctx.clearRect(0, 0, hostCanvas.width, hostCanvas.height);
+      hctx.drawImage(img, 0, 0, hostCanvas.width, hostCanvas.height);
+    };
+    img.src = drawingPayload.data;
+  }
+
   static clearCanvas() {
     const canvas = document.getElementById('mobile-draw-canvas');
     if (canvas) {
@@ -619,10 +648,15 @@ class DrawGuessGame {
       const hctx = hostCanvas.getContext('2d');
       hctx.clearRect(0, 0, hostCanvas.width, hostCanvas.height);
     }
+    stateStore.submitDrawing(stateStore.getSelfId(), '');
   }
 
   static submitDraw() {
     audioEngine.playVictoryFanfare();
+    const canvas = document.getElementById('mobile-draw-canvas');
+    if (canvas) {
+      stateStore.submitDrawing(stateStore.getSelfId(), canvas.toDataURL());
+    }
     gameEngine.handlePlayerAnswer(stateStore.getSelfId(), { summary: "أنهى الرسمة! 🎨" });
   }
 

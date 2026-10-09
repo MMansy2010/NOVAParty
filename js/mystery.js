@@ -76,15 +76,33 @@ class MysteryEngine {
     if (nextEvidenceIndex < this.caseData.evidences.length) {
       const newEv = this.caseData.evidences[nextEvidenceIndex];
       this.unlockedEvidences.push(newEv);
+      stateStore.updateUnlockedEvidences(this.unlockedEvidences);
       audioEngine.playMysteryChime();
       stateStore.addLog(`🔓 تم كشف دليل جديد: ${newEv.title}!`);
     }
+  }
+
+  renderMobileEvidenceList() {
+    const list = document.getElementById('mobile-evidence-list');
+    if (!list) return;
+    if (!this.unlockedEvidences || this.unlockedEvidences.length === 0) {
+      list.innerHTML = `<p style="color:var(--text-muted); text-align:center; padding:15px;">لم يكتشف الفريق أي أدلة سرية بعد... لعب الجولات يساعد في فك تشفير القضايا!</p>`;
+      return;
+    }
+
+    list.innerHTML = this.unlockedEvidences.map(ev => `
+      <div class="glass-card" style="padding:12px 14px; margin-bottom:10px; border-right:4px solid var(--gold);">
+        <strong style="color:var(--gold); display:block; font-size:1.05rem;">${ev.title}</strong>
+        <p style="font-size:0.85rem; color:var(--text-main); margin-top:4px;">${ev.desc}</p>
+      </div>
+    `).join('');
   }
 
   startDiscussionPhase() {
     this.phase = 'discussion';
     audioEngine.playMysteryChime();
     stateStore.addLog("🗣️ بدأت مرحلة المناقشة الحية لمدة 3 دقائق!");
+    stateStore.broadcast('MYSTERY_DISCUSSION_START', {});
 
     const hostStage = document.getElementById('host-game-canvas');
     if (hostStage) {
@@ -92,11 +110,11 @@ class MysteryEngine {
         <div style="text-align:center; padding:30px;">
           <h1 style="font-size:3rem; color:var(--gold); margin-bottom:15px;">🗣️ DISCUSSION PHASE — تناقشوا الآن!</h1>
           <p style="font-size:1.4rem; color:var(--text-main); max-width:700px; margin:0 auto 20px;">
-            كل لاعب حصل على دلاء سرية مختلفة في موبايله! قارنوا الأوقات والأقوال لمعرفة من الكذاب!
+            كل لاعب حصل على أدلة سرية مختلفة في موبايله! قارنوا الأوقات والأقوال لمعرفة من الكذاب!
           </p>
           <div style="font-size:4rem; font-weight:900; color:var(--danger);" id="disc-timer">03:00</div>
           <button class="btn primary-btn giant-btn" style="margin-top:25px;" onclick="mysteryEngine.triggerFinalAccusation()">
-            ⚖️ الانقال فوراً للتصويت والاتهام النهائي (FINAL ACCUSATION)
+            ⚖️ الانتقال فوراً للتصويت والاتهام النهائي (FINAL ACCUSATION)
           </button>
         </div>
       `;
@@ -130,6 +148,7 @@ class MysteryEngine {
   triggerFinalAccusation() {
     this.phase = 'reveal';
     audioEngine.playVictoryFanfare();
+    stateStore.broadcast('MYSTERY_REVEAL_START', {});
 
     // Calculate score for correct culprit accusation
     stateStore.players.forEach(p => {

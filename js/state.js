@@ -1,5 +1,6 @@
 /* ==========================================================================
    NOVA PARTY — FIREBASE REALTIME DATABASE CONFIGURATION & SYNC ENGINE
+   Real-Time Cross-Device Synchronization for Mobile Phones, Laptops & TV Displays
    ========================================================================== */
 const firebaseConfig = {
   apiKey: "AIzaSyAGBU3Rwjubml8OXNe1lKP2sISoK-Gb0RA",
@@ -31,16 +32,19 @@ class GameStateStore {
     this.timer = 15;
     this.isTimerPaused = false;
     
-    // Mystery Mode State
-    this.unlockedEvidence = {}; 
-    this.accusations = {}; 
-    this.logs = ['[نظام] أهلاً بك في NOVA Party!'];
+    // Realtime Game Data
+    this.answersMap = {}; // { playerId: answerData }
+    this.drawingData = null; // { data: url/strokes, playerId, timestamp }
+    this.unlockedEvidences = []; 
+    this.accusations = {}; // { playerId: { culprit, motive } }
+    this.logs = ['[نظام] أهلاً بك في NOVA Party! جاهز للاتصال المباشر.'];
 
     this.listeners = [];
     
     // Firebase Realtime DB Setup
     this.db = null;
     this.roomRef = null;
+    this.firebaseConnected = false;
 
     this.initFirebase();
     this.loadActiveRoomFromStorage();
@@ -51,7 +55,7 @@ class GameStateStore {
     return Math.floor(1000 + Math.random() * 9000).toString();
   }
 
-  initFirebase() {
+  async initFirebase() {
     if (!window.firebase) {
       console.warn("Firebase SDK not loaded");
       return;
@@ -61,9 +65,27 @@ class GameStateStore {
       if (!window.firebase.apps.length) {
         window.firebase.initializeApp(firebaseConfig);
       }
+
+      // Anonymous auth attempt to ensure read/write rules if enforced
+      if (window.firebase.auth) {
+        try {
+          await window.firebase.auth().signInAnonymously();
+        } catch (authErr) {
+          console.warn("Firebase Anonymous Auth Note:", authErr);
+        }
+      }
+
       this.db = window.firebase.database();
       console.log("🔥 Firebase Realtime Database Initialized!");
       this.addLog("🔥 [Firebase] تم الاتصال بقاعدة بيانات الفايربيز المباشرة!");
+
+      // Monitor online connection status
+      const connectedRef = this.db.ref('.info/connected');
+      connectedRef.on('value', (snap) => {
+        this.firebaseConnected = (snap.val() === true);
+        this.notifyListeners('FIREBASE_STATUS_CHANGE', { connected: this.firebaseConnected });
+      });
+
       if (this.roomCode) {
         this.subscribeToFirebaseRoom(this.roomCode);
       }
@@ -74,10 +96,14 @@ class GameStateStore {
 
   subscribeToFirebaseRoom(code) {
     if (!this.db || !code) return;
-    const roomPath = `rooms/${code.toUpperCase()}`;
+    const cleanCode = code.trim().toUpperCase();
+    this.roomCode = cleanCode;
+    const roomPath = `rooms/${cleanCode}`;
+
     if (this.roomRef) {
       this.roomRef.off();
     }
+
     this.roomRef = this.db.ref(roomPath);
     this.roomRef.on('value', (snapshot) => {
       const data = snapshot.val();
@@ -98,8 +124,10 @@ class GameStateStore {
     if (data.currentRound !== undefined) this.currentRound = data.currentRound;
     if (data.activeGameIndex !== undefined) this.activeGameIndex = data.activeGameIndex;
     if (data.isTimerPaused !== undefined) this.isTimerPaused = data.isTimerPaused;
+    if (data.timer !== undefined) this.timer = data.timer;
     if (data.hostId) this.hostId = data.hostId;
     
+    // Players List Sync
     if (data.players) {
       const playerList = Array.isArray(data.players) ? data.players : Object.values(data.players);
       this.players = playerList.sort((a, b) => (b.score || 0) - (a.score || 0));
@@ -107,6 +135,36 @@ class GameStateStore {
       this.players = [];
     }
 
+    // Answers Sync
+    if (data.answers) {
+      this.answersMap = typeof data.answers === 'object' ? data.answers : {};
+      if (window.gameEngine) {
+        window.gameEngine.answersMap = this.answersMap;
+      }
+    } else {
+      this.answersMap = {};
+      if (window.gameEngine) window.gameEngine.answersMap = {};
+    }
+
+    // Drawing Canvas Sync
+    if (data.drawing) {
+      this.drawingData = data.drawing;
+    }
+
+    // Mystery Mode Evidence Sync
+    if (data.unlockedEvidences) {
+      this.unlockedEvidences = Array.isArray(data.unlockedEvidences) ? data.unlockedEvidences : Object.values(data.unlockedEvidences);
+      if (window.mysteryEngine) {
+        window.mysteryEngine.unlockedEvidences = this.unlockedEvidences;
+      }
+    }
+
+    // Accusations Sync
+    if (data.accusations) {
+      this.accusations = typeof data.accusations === 'object' ? data.accusations : {};
+    }
+
+    // Logs Sync
     if (data.logs) {
       this.logs = Array.isArray(data.logs) ? data.logs : Object.values(data.logs);
     }
@@ -159,7 +217,9 @@ class GameStateStore {
     this.hostId = this.getSelfId();
     this.activeGameIndex = 0;
     this.currentRound = 1;
-    this.unlockedEvidence = {};
+    this.answersMap = {};
+    this.drawingData = null;
+    this.unlockedEvidences = [];
     this.accusations = {};
     this.logs = [`[غرفة] تم إنشاء غرفة جديدة برمز: ${this.roomCode}`];
     
@@ -213,6 +273,7 @@ class GameStateStore {
         currentRound: this.currentRound,
         activeGameIndex: this.activeGameIndex,
         isTimerPaused: this.isTimerPaused,
+        timer: this.timer,
         hostId: this.hostId,
         lastAction: action,
         lastPayload: payload || null,
@@ -240,6 +301,53 @@ class GameStateStore {
     } catch (e) {}
 
     this.handleIncomingMessage(message);
+  }
+
+  submitPlayerAnswer(playerId, answerData) {
+    if (!this.db || !this.roomCode) return;
+    this.answersMap[playerId] = answerData;
+    
+    // Save to Firebase under answers/playerId
+    this.db.ref(`rooms/${this.roomCode.toUpperCase()}/answers/${playerId}`).set(answerData);
+    this.db.ref(`rooms/${this.roomCode.toUpperCase()}`).update({
+      lastAction: 'SUBMIT_ANSWER',
+      lastPayload: { playerId, answerData },
+      lastTimestamp: Date.now()
+    });
+
+    this.broadcast('SUBMIT_ANSWER', { playerId, answerData });
+  }
+
+  submitDrawing(playerId, drawData) {
+    if (!this.db || !this.roomCode) return;
+    const payload = { data: drawData, playerId, timestamp: Date.now() };
+    this.drawingData = payload;
+    this.db.ref(`rooms/${this.roomCode.toUpperCase()}/drawing`).set(payload);
+    this.broadcast('DRAWING_SYNC', payload);
+  }
+
+  submitAccusation(playerId, accusationData) {
+    if (!this.db || !this.roomCode) return;
+    this.accusations[playerId] = accusationData;
+    this.db.ref(`rooms/${this.roomCode.toUpperCase()}/accusations/${playerId}`).set(accusationData);
+    this.broadcast('SUBMIT_ACCUSATION', { playerId, accusationData });
+  }
+
+  updateUnlockedEvidences(evidences) {
+    this.unlockedEvidences = evidences;
+    if (this.db && this.roomCode) {
+      this.db.ref(`rooms/${this.roomCode.toUpperCase()}/unlockedEvidences`).set(evidences);
+    }
+    this.broadcast('EVIDENCE_UNLOCKED', evidences);
+  }
+
+  clearRoundState() {
+    this.answersMap = {};
+    this.drawingData = null;
+    if (this.db && this.roomCode) {
+      this.db.ref(`rooms/${this.roomCode.toUpperCase()}/answers`).remove();
+      this.db.ref(`rooms/${this.roomCode.toUpperCase()}/drawing`).remove();
+    }
   }
 
   handleIncomingMessage(data) {
@@ -283,6 +391,8 @@ class GameStateStore {
           this.activeGameIndex = payload.gameIndex !== undefined ? payload.gameIndex : this.activeGameIndex;
           this.currentRound = payload.currentRound || (this.activeGameIndex + 1);
         }
+        this.answersMap = {};
+        this.drawingData = null;
         this.addLog(`🎮 بدأت الجولة ${this.currentRound}`);
         this.saveActiveRoomToStorage();
         break;
@@ -298,8 +408,20 @@ class GameStateStore {
         }
         break;
       case 'SUBMIT_ANSWER':
-        if (payload) {
-          this.onAnswerReceived(payload);
+        if (payload && payload.answerData) {
+          this.answersMap[payload.playerId] = payload.answerData;
+          if (window.gameEngine) window.gameEngine.answersMap[payload.playerId] = payload.answerData;
+          this.onAnswerReceived({
+            playerId: payload.playerId,
+            playerName: (this.players.find(p => p.id === payload.playerId) || {}).name || payload.playerId,
+            summary: payload.answerData.summary || 'تم تسجيل الإجابة'
+          });
+        }
+        break;
+      case 'SUBMIT_ACCUSATION':
+        if (payload && payload.playerId && payload.accusationData) {
+          this.accusations[payload.playerId] = payload.accusationData;
+          this.addLog(`⚖️ سلم ${payload.accusationData.playerName || 'لاعب'} اتهامه النهائي!`);
         }
         break;
     }
@@ -411,7 +533,9 @@ class GameStateStore {
     this.activeGameIndex = 0;
     this.currentRound = 1;
     this.currentPhase = 'lobby';
-    this.unlockedEvidence = {};
+    this.answersMap = {};
+    this.drawingData = null;
+    this.unlockedEvidences = [];
     this.accusations = {};
     this.logs = ['[نظام] تم إعادة ضبط الغرفة.'];
     this.saveActiveRoomToStorage();
@@ -443,6 +567,7 @@ class GameStateStore {
 
 const stateStore = new GameStateStore();
 window.stateStore = stateStore;
+
 
 
 
