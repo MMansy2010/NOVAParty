@@ -159,3 +159,4 @@ class MysteryEngine {
 }
 
 const mysteryEngine = new MysteryEngine();
+window.mysteryEngine = mysteryEngine;

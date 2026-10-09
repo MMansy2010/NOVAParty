@@ -90,3 +90,4 @@ class AudioEngine {
 }
 
 const audioEngine = new AudioEngine();
+window.audioEngine = audioEngine;
