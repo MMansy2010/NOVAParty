@@ -648,3 +648,10 @@ gameEngine.registerGame(new PhysicalChallengeGame());
 gameEngine.registerGame(new MemoryGame());
 gameEngine.registerGame(new DrawGuessGame());
 
+window.gameEngine = gameEngine;
+window.ReactionGame = ReactionGame;
+window.SeerahQuizGame = SeerahQuizGame;
+window.PhysicalChallengeGame = PhysicalChallengeGame;
+window.MemoryGame = MemoryGame;
+window.DrawGuessGame = DrawGuessGame;
+

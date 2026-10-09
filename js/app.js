@@ -464,6 +464,7 @@ class NovaApp {
 }
 
 const app = new NovaApp();
+window.app = app;
 
 // Auto init on window load
 window.addEventListener('DOMContentLoaded', () => {
