@@ -15,9 +15,6 @@ const firebaseConfig = {
 
 class GameStateStore {
   constructor() {
-    this.channelName = 'nova_party_realtime_bus';
-    this.channel = null;
-    
     // Core Game State
     this.roomCode = '1234';
     this.gameMode = 'party'; // 'party' or 'mystery'
@@ -37,7 +34,7 @@ class GameStateStore {
     this.drawingData = null; // { data: url/strokes, playerId, timestamp }
     this.unlockedEvidences = []; 
     this.accusations = {}; // { playerId: { culprit, motive } }
-    this.logs = ['[نظام] أهلاً بك في NOVA Party! جاهز للاتصال المباشر.'];
+    this.logs = ['[نظام] أهلاً بك في NOVA Party! جاهز للاتصال المباشر عبر الفايربيز.'];
 
     this.listeners = [];
     
@@ -47,8 +44,6 @@ class GameStateStore {
     this.firebaseConnected = false;
 
     this.initFirebase();
-    this.loadActiveRoomFromStorage();
-    this.initRealtime();
   }
 
   generateRoomCode() {
@@ -77,7 +72,7 @@ class GameStateStore {
 
       this.db = window.firebase.database();
       console.log("🔥 Firebase Realtime Database Initialized!");
-      this.addLog("🔥 [Firebase] تم الاتصال بقاعدة بيانات الفايربيز المباشرة!");
+      this.addLog("🔥 [Firebase] تم الاتصال المباشر بالسيرفر السحابي للفايربيز!");
 
       // Monitor online connection status
       const connectedRef = this.db.ref('.info/connected');
@@ -169,44 +164,7 @@ class GameStateStore {
       this.logs = Array.isArray(data.logs) ? data.logs : Object.values(data.logs);
     }
 
-    this.saveActiveRoomToStorage();
     this.notifyListeners(action, payload);
-  }
-
-  loadActiveRoomFromStorage() {
-    try {
-      const saved = localStorage.getItem('nova_active_room_data');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed.roomCode) {
-          this.roomCode = parsed.roomCode;
-          this.gameMode = parsed.gameMode || 'party';
-          this.currentPhase = parsed.currentPhase || 'lobby';
-          this.players = parsed.players || [];
-          this.activeGameIndex = parsed.activeGameIndex || 0;
-          this.currentRound = parsed.currentRound || 1;
-          this.hostId = parsed.hostId || null;
-        }
-      }
-    } catch (e) {}
-
-    if (!this.roomCode) {
-      this.roomCode = '1234';
-    }
-  }
-
-  saveActiveRoomToStorage() {
-    try {
-      localStorage.setItem('nova_active_room_data', JSON.stringify({
-        roomCode: this.roomCode,
-        gameMode: this.gameMode,
-        currentPhase: this.currentPhase,
-        players: this.players,
-        activeGameIndex: this.activeGameIndex,
-        currentRound: this.currentRound,
-        hostId: this.hostId
-      }));
-    } catch (e) {}
   }
 
   createRoom(gameMode = 'party') {
@@ -221,12 +179,11 @@ class GameStateStore {
     this.drawingData = null;
     this.unlockedEvidences = [];
     this.accusations = {};
-    this.logs = [`[غرفة] تم إنشاء غرفة جديدة برمز: ${this.roomCode}`];
+    this.logs = [`[غرفة] تم إنشاء غرفة سحابية جديدة برمز: ${this.roomCode}`];
     
     sessionStorage.setItem('nova_is_host', 'true');
     sessionStorage.setItem('nova_room_code', this.roomCode);
 
-    this.saveActiveRoomToStorage();
     this.subscribeToFirebaseRoom(this.roomCode);
 
     this.broadcast('ROOM_CREATED', {
@@ -238,33 +195,10 @@ class GameStateStore {
     return this.roomCode;
   }
 
-  initRealtime() {
-    if ('BroadcastChannel' in window) {
-      this.channel = new BroadcastChannel(this.channelName);
-      this.channel.onmessage = (event) => {
-        this.handleIncomingMessage(event.data);
-      };
-    }
-
-    window.addEventListener('storage', (e) => {
-      if (e.key === 'nova_party_cross_event' && e.newValue) {
-        try {
-          const message = JSON.parse(e.newValue);
-          if (message.senderId !== this.getSelfId()) {
-            this.handleIncomingMessage(message);
-          }
-        } catch (err) {}
-      } else if (e.key === 'nova_active_room_data') {
-        this.loadActiveRoomFromStorage();
-        this.notifyListeners('STORAGE_SYNC', null);
-      }
-    });
-  }
-
   broadcast(action, payload) {
     const message = { action, payload, senderId: this.getSelfId(), timestamp: Date.now() };
 
-    // Update Firebase Realtime Database
+    // Update Firebase Realtime Database exclusively
     if (this.db && this.roomCode) {
       const updates = {
         roomCode: this.roomCode,
@@ -291,14 +225,6 @@ class GameStateStore {
         console.warn("Firebase update warning:", err);
       });
     }
-
-    // Local Tab BroadcastChannel & localStorage fallback
-    if (this.channel) {
-      try { this.channel.postMessage(message); } catch (e) {}
-    }
-    try {
-      localStorage.setItem('nova_party_cross_event', JSON.stringify(message));
-    } catch (e) {}
 
     this.handleIncomingMessage(message);
   }
