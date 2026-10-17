@@ -81,6 +81,13 @@ class AudioEngine {
     setTimeout(() => this.playTone(493.88, 'sine', 0.4, 0.2), 300); // B4
   }
 
+  playGoldCoins() {
+    const notes = [587.33, 880, 1174.66]; // D5, A5, D6
+    notes.forEach((freq, idx) => {
+      setTimeout(() => this.playTone(freq, 'sine', 0.1, 0.15), idx * 70);
+    });
+  }
+
   playVictoryFanfare() {
     const notes = [523.25, 659.25, 783.99, 1046.50];
     notes.forEach((freq, idx) => {

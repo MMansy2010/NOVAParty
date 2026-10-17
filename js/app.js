@@ -240,18 +240,24 @@ class NovaApp {
       const hostCanvas = document.getElementById('host-game-canvas');
       const mobileController = document.getElementById('mobile-game-controller');
 
-      // Broadcast to all connected player devices that the round has started
+      const activeGame = gameEngine.games[gameIdx % gameEngine.games.length];
+      let roundData = null;
+      if (activeGame && activeGame.prepareRoundData) {
+        roundData = activeGame.prepareRoundData();
+      }
+
+      // Broadcast to all connected player devices that the round has started with synchronized data
       stateStore.broadcast('ROUND_STARTED', {
         gameIndex: gameIdx,
-        currentRound: stateStore.currentRound
+        currentRound: stateStore.currentRound,
+        roundData: roundData
       });
 
       // Initialize round on Host TV display
-      gameEngine.startRound(gameIdx, hostCanvas, mobileController);
+      gameEngine.startRound(gameIdx, hostCanvas, mobileController, roundData);
     } else {
       this.showHostStage('mystery');
-      const hostStage = document.getElementById('host-stage-mystery');
-      mysteryEngine.renderCaseBoard(hostStage);
+      mysteryEngine.startMysteryFlow();
     }
   }
 
@@ -392,12 +398,22 @@ class NovaApp {
     });
   }
 
+  updateMobilePlayerScore() {
+    const myId = stateStore.getSelfId();
+    const me = stateStore.players.find(p => p.id === myId);
+    const scoreEl = document.getElementById('mobile-score-display');
+    if (scoreEl && me) {
+      scoreEl.textContent = `⭐ ${me.score || 0} XP`;
+    }
+  }
+
   onStateChange(action, payload, state) {
     this.updateHostHeaderInfo();
     this.renderHostPlayersGrid();
     this.renderHostLeaderboard();
     this.renderLogs();
     this.renderMobileLobby();
+    this.updateMobilePlayerScore();
 
     if (action === 'FIREBASE_STATUS_CHANGE') {
       this.updateFirebaseStatusBadge(payload ? payload.connected : false);
@@ -424,11 +440,36 @@ class NovaApp {
         // Setup mobile touch controller for this round
         const mobileController = document.getElementById('mobile-game-controller');
         const activeIdx = (payload && payload.gameIndex !== undefined) ? payload.gameIndex : stateStore.activeGameIndex;
-        gameEngine.setupMobileController(activeIdx, mobileController);
+        const roundData = (payload && payload.roundData) ? payload.roundData : stateStore.currentRoundData;
+        gameEngine.setupMobileController(activeIdx, mobileController, roundData);
       }
     }
 
-    if (action === 'MYSTERY_DISCUSSION_START' || action === 'MYSTERY_REVEAL_START') {
+    if (action === 'MYSTERY_BRIEFING') {
+      const hasJoined = sessionStorage.getItem('nova_joined_player');
+      if (this.currentView === 'mobile' || hasJoined) {
+        document.querySelectorAll('.mobile-screen').forEach(s => s.classList.remove('active'));
+        const mysteryScreen = document.getElementById('mobile-mystery-screen');
+        if (mysteryScreen) mysteryScreen.classList.add('active');
+        if (window.mysteryEngine) {
+          window.mysteryEngine.renderMobileEvidenceList();
+        }
+      }
+    }
+
+    if (action === 'MYSTERY_DISCUSSION_START') {
+      const hasJoined = sessionStorage.getItem('nova_joined_player');
+      if (this.currentView === 'mobile' || hasJoined) {
+        document.querySelectorAll('.mobile-screen').forEach(s => s.classList.remove('active'));
+        const mysteryScreen = document.getElementById('mobile-mystery-screen');
+        if (mysteryScreen) mysteryScreen.classList.add('active');
+        if (window.mysteryEngine) {
+          window.mysteryEngine.renderMobileEvidenceList();
+        }
+      }
+    }
+
+    if (action === 'MYSTERY_ACCUSATION_START') {
       const hasJoined = sessionStorage.getItem('nova_joined_player');
       if (this.currentView === 'mobile' || hasJoined) {
         document.querySelectorAll('.mobile-screen').forEach(s => s.classList.remove('active'));
@@ -440,6 +481,12 @@ class NovaApp {
           mobMystery.classList.remove('hidden');
           window.mysteryEngine.renderMobileSuspectSelect();
         }
+      }
+    }
+
+    if (action === 'SUBMIT_ACCUSATION') {
+      if (window.mysteryEngine && window.mysteryEngine.phase === 'accusation') {
+        window.mysteryEngine.renderAccusationTracker();
       }
     }
 
@@ -547,7 +594,18 @@ class NovaApp {
     };
 
     stateStore.submitAccusation(pId, accusationData);
-    alert('تم تسليم الاتهام بنجاح للفايربيز! انتظر إعلان النتائج على شاشة التلفزيون.');
+    audioEngine.playVictoryFanfare();
+
+    const panel = document.getElementById('mobile-accusation-panel');
+    if (panel) {
+      panel.innerHTML = `
+        <div style="text-align:center; padding:25px 10px;">
+          <div style="font-size:3.5rem; margin-bottom:12px;">⚖️🔒</div>
+          <h3 style="color:var(--accent); font-size:1.4rem; margin-bottom:8px;">تم تسليم اتهامك النهائي بنجاح!</h3>
+          <p style="color:var(--text-muted); font-size:0.95rem; line-height:1.4;">انظر إلى شاشة العرض الرئيسية (TV Host) الآن لمشاهدة كشف الجاني الحقيقي وتتويج المحققين!</p>
+        </div>
+      `;
+    }
   }
 }
 

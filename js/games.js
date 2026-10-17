@@ -19,7 +19,7 @@ class GameEngine {
     return this.games;
   }
 
-  startRound(gameIndex, hostContainer, mobileContainer) {
+  startRound(gameIndex, hostContainer, mobileContainer, roundData) {
     if (this.timerId) clearInterval(this.timerId);
     this.answersMap = {};
     stateStore.clearRoundState();
@@ -37,8 +37,14 @@ class GameEngine {
     const hostStage = hostContainer || document.getElementById('host-game-canvas');
     const mobStage = mobileContainer || document.getElementById('mobile-game-controller');
     
+    let rData = roundData;
+    if (!rData && this.activeGame.prepareRoundData) {
+      rData = this.activeGame.prepareRoundData();
+    }
+    stateStore.currentRoundData = rData;
+
     if (this.activeGame.initRound) {
-      this.activeGame.initRound(hostStage, mobStage);
+      this.activeGame.initRound(hostStage, mobStage, rData);
     }
 
     let timeLeft = this.activeGame.duration || 15;
@@ -93,7 +99,7 @@ class GameEngine {
     }
   }
 
-  setupMobileController(gameIndex, mobileContainer) {
+  setupMobileController(gameIndex, mobileContainer, roundData) {
     const gameIdx = gameIndex !== undefined ? gameIndex : stateStore.activeGameIndex;
     this.activeGame = this.games[gameIdx % this.games.length];
     
@@ -102,8 +108,9 @@ class GameEngine {
 
     // Create virtual dummy host container if not rendering on host tab
     const dummyHost = document.createElement('div');
+    const rData = roundData || stateStore.currentRoundData;
     if (this.activeGame && this.activeGame.initRound) {
-      this.activeGame.initRound(dummyHost, mobStage);
+      this.activeGame.initRound(dummyHost, mobStage, rData);
     }
   }
 
@@ -165,8 +172,15 @@ class ReactionGame {
     this.isReady = false;
   }
 
-  initRound(host, mobile) {
+  prepareRoundData() {
+    const randomDelay = Math.floor(Math.random() * 2500) + 2000;
+    return { startDelay: randomDelay };
+  }
+
+  initRound(host, mobile, roundData) {
     this.isReady = false;
+    const delay = (roundData && roundData.startDelay) ? roundData.startDelay : 2500;
+
     if (host) {
       host.innerHTML = `
         <div style="text-align:center;">
@@ -186,7 +200,6 @@ class ReactionGame {
       `;
     }
 
-    const randomDelay = Math.floor(Math.random() * 3000) + 2000;
     setTimeout(() => {
       this.isReady = true;
       this.startTime = Date.now();
@@ -210,7 +223,7 @@ class ReactionGame {
         tapBtn.style.boxShadow = "0 8px 30px rgba(16,185,129,0.5)";
         tapBtn.textContent = "اضغط بسرعة! 🟢";
       }
-    }, randomDelay);
+    }, delay);
 
     const btn = document.getElementById('tap-btn');
     if (btn) {
@@ -292,8 +305,16 @@ class SeerahQuizGame {
     this.currentQ = null;
   }
 
-  initRound(host, mobile) {
-    this.currentQ = this.questions[Math.floor(Math.random() * this.questions.length)];
+  prepareRoundData() {
+    const idx = Math.floor(Math.random() * this.questions.length);
+    return { questionIndex: idx };
+  }
+
+  initRound(host, mobile, roundData) {
+    const idx = (roundData && roundData.questionIndex !== undefined) 
+      ? roundData.questionIndex 
+      : Math.floor(Math.random() * this.questions.length);
+    this.currentQ = this.questions[idx % this.questions.length];
 
     if (host) {
       host.innerHTML = `
@@ -362,28 +383,49 @@ class PhysicalChallengeGame {
     this.activeChallenge = null;
   }
 
-  initRound(host, mobile) {
-    this.activeChallenge = this.challenges[Math.floor(Math.random() * this.challenges.length)];
+  prepareRoundData() {
+    const idx = Math.floor(Math.random() * this.challenges.length);
+    return { challengeIndex: idx };
+  }
+
+  initRound(host, mobile, roundData) {
+    const idx = (roundData && roundData.challengeIndex !== undefined) 
+      ? roundData.challengeIndex 
+      : Math.floor(Math.random() * this.challenges.length);
+    this.activeChallenge = this.challenges[idx % this.challenges.length];
+    if (stateStore) stateStore.activeChallenge = this.activeChallenge;
 
     if (host) {
       host.innerHTML = `
         <div style="text-align:center; padding:10px;">
           <h1 style="font-size:2.8rem; color:var(--gold); margin-bottom:15px;">${this.activeChallenge.icon} تحدي الحركات المباشر!</h1>
-          <h2 style="font-size:1.8rem; color:white; margin-bottom:25px; line-height:1.5;">${this.activeChallenge.text}</h2>
+          <h2 style="font-size:1.8rem; color:white; margin-bottom:20px; line-height:1.5;">${this.activeChallenge.text}</h2>
           
-          <p style="color:var(--text-muted); font-size:1.1rem; margin-bottom:15px;">الهوست يحدد النقاط للاعبين الذين ينهون التحدي أولاً في الحقيقة:</p>
-          
-          <div id="host-physical-scores" style="display:flex; flex-wrap:wrap; gap:12px; justify-content:center; max-width:650px; margin:0 auto;">
-            ${stateStore.players.map(p => `
-              <div style="background:rgba(255,255,255,0.08); padding:12px 18px; border-radius:14px; text-align:center;">
-                <div style="font-weight:bold; font-size:1.2rem; margin-bottom:8px;">${p.avatar || '🎮'} ${p.name}</div>
-                <div style="display:flex; gap:6px;">
-                  <button class="btn gold-btn primary-sm" onclick="PhysicalChallengeGame.award('${p.id}', 300)">🥇 +300</button>
-                  <button class="btn primary-btn primary-sm" onclick="PhysicalChallengeGame.award('${p.id}', 200)">🥈 +200</button>
-                  <button class="btn secondary-btn secondary-sm" onclick="PhysicalChallengeGame.award('${p.id}', 100)">🥉 +100</button>
-                </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; max-width:850px; margin:0 auto; text-align:right;">
+            <!-- Live Finishers Feed -->
+            <div class="glass-panel" style="padding:15px; border-color:var(--accent);">
+              <h3 style="color:var(--accent); font-size:1.1rem; margin-bottom:10px;">⚡ ترتيب الواصلين أولاً (Live):</h3>
+              <div id="host-physical-finishers" style="display:flex; flex-direction:column; gap:8px;">
+                <p id="host-no-finishers" style="color:var(--text-muted); font-size:0.9rem;">بانتظار وصول أول لاعب... انطلقوا! 🏃💨</p>
               </div>
-            `).join('')}
+            </div>
+
+            <!-- Manual Award Controls for Host -->
+            <div class="glass-panel" style="padding:15px;">
+              <h3 style="color:var(--gold); font-size:1.1rem; margin-bottom:10px;">🎮 منح نقاط إضافية مباشرة من الهوست:</h3>
+              <div id="host-physical-scores" style="display:flex; flex-direction:column; gap:8px; max-height:220px; overflow-y:auto;">
+                ${stateStore.players.map(p => `
+                  <div style="background:rgba(255,255,255,0.06); padding:8px 12px; border-radius:10px; display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-weight:bold; font-size:1rem;">${p.avatar || '🎮'} ${p.name}</span>
+                    <div style="display:flex; gap:6px;">
+                      <button class="btn gold-btn primary-sm" onclick="PhysicalChallengeGame.award('${p.id}', 300)" style="padding:4px 8px; font-size:0.8rem;">🥇 +300</button>
+                      <button class="btn primary-btn primary-sm" onclick="PhysicalChallengeGame.award('${p.id}', 200)" style="padding:4px 8px; font-size:0.8rem;">🥈 +200</button>
+                      <button class="btn secondary-btn secondary-sm" onclick="PhysicalChallengeGame.award('${p.id}', 100)" style="padding:4px 8px; font-size:0.8rem;">🥉 +100</button>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
           </div>
         </div>
       `;
@@ -394,7 +436,7 @@ class PhysicalChallengeGame {
         <div style="text-align:center; padding:15px 5px;">
           <div style="font-size:3.5rem; margin-bottom:10px;">${this.activeChallenge.icon}</div>
           <h2 style="color:var(--gold); font-size:1.4rem; margin-bottom:15px; line-height:1.4;">${this.activeChallenge.text}</h2>
-          <p style="color:var(--text-muted); font-size:0.95rem; margin-bottom:20px;">انطلق فوراً! وعندما تنتهي، اضغط الزر أدناه لتنبيه الهوست!</p>
+          <p style="color:var(--text-muted); font-size:0.95rem; margin-bottom:20px;">انطلق فوراً! وعندما تنتهي، اضغط الزر أدناه لتسجيل وصولك عند الهوست فوراً!</p>
           <button id="phys-done-btn" class="btn gold-btn giant-btn" onclick="PhysicalChallengeGame.finishPhysical()" style="width:100%; height:80px; font-size:1.5rem; border-radius:20px;">خلصت التحدي! ✋🔥</button>
         </div>
       `;
@@ -403,12 +445,36 @@ class PhysicalChallengeGame {
 
   static finishPhysical() {
     audioEngine.playVictoryFanfare();
-    gameEngine.handlePlayerAnswer(stateStore.getSelfId(), { summary: "أنهى التحدي البدني! ✋" });
+    const finishTime = Date.now();
+    gameEngine.handlePlayerAnswer(stateStore.getSelfId(), { 
+      summary: "أنهى التحدي البدني! ✋",
+      finishTime: finishTime
+    });
     const btn = document.getElementById('phys-done-btn');
     if (btn) {
       btn.disabled = true;
       btn.textContent = "تم إرسال إشعار الانتهاء! 🎯";
       btn.style.opacity = "0.7";
+    }
+  }
+
+  onAnswerReceived(playerId, data) {
+    const p = stateStore.players.find(x => x.id === playerId);
+    const container = document.getElementById('host-physical-finishers');
+    const noFinish = document.getElementById('host-no-finishers');
+    if (noFinish) noFinish.style.display = 'none';
+
+    if (container && p) {
+      const currentCount = container.querySelectorAll('.finisher-entry').length + 1;
+      const medal = currentCount === 1 ? '🥇' : (currentCount === 2 ? '🥈' : (currentCount === 3 ? '🥉' : '🎖️'));
+      const entry = document.createElement('div');
+      entry.className = 'finisher-entry animate-pop';
+      entry.style.cssText = 'background:rgba(16,185,129,0.18); border:1px solid var(--accent); padding:8px 12px; border-radius:8px; display:flex; justify-content:space-between; align-items:center;';
+      entry.innerHTML = `
+        <span>${medal} #${currentCount} ${p.avatar} ${p.name}</span>
+        <strong style="color:var(--accent);">تم بنجاح! ⚡</strong>
+      `;
+      container.appendChild(entry);
     }
   }
 
@@ -419,8 +485,19 @@ class PhysicalChallengeGame {
     stateStore.addLog(`🏆 أعطى الهوست ${points} نقطة للاعب ${p ? p.name : pid}!`);
   }
 
-  calculateScores() {
-    // Scores awarded dynamically by host
+  calculateScores(answers) {
+    // Automatically rank all who pressed finish
+    const submissions = Object.entries(answers)
+      .map(([pid, data]) => ({ pid, finishTime: data.finishTime || 0 }))
+      .sort((a, b) => a.finishTime - b.finishTime);
+
+    submissions.forEach((item, index) => {
+      let points = 50;
+      if (index === 0) points = 300;
+      else if (index === 1) points = 200;
+      else if (index === 2) points = 100;
+      stateStore.updatePlayerScore(item.pid, points);
+    });
   }
 
   showRoundSummary(host) {
@@ -428,7 +505,7 @@ class PhysicalChallengeGame {
       host.innerHTML = `
         <div style="text-align:center;">
           <h2 style="font-size:2.2rem; color:var(--gold);">💪 انتهى تحدي اللياقة والنشاط!</h2>
-          <p style="font-size:1.2rem; margin-top:10px;">تم تسجيل النقاط الممنوحة بواسطة الهوست.</p>
+          <p style="font-size:1.2rem; margin-top:10px; color:var(--text-main);">تم توزيع نقاط XP للمراكز الأولى بحسب سرعة الإنجاز وتقييم الهوست.</p>
         </div>
       `;
     }
@@ -446,9 +523,22 @@ class MemoryGame {
     this.missingItem = '';
   }
 
-  initRound(host, mobile) {
+  prepareRoundData() {
     const shuffled = [...this.items].sort(() => 0.5 - Math.random());
-    this.missingItem = shuffled.pop();
+    const missing = shuffled.pop();
+    return { shownItems: shuffled, missingItem: missing };
+  }
+
+  initRound(host, mobile, roundData) {
+    let shuffled = [];
+    if (roundData && roundData.shownItems) {
+      shuffled = roundData.shownItems;
+      this.missingItem = roundData.missingItem;
+    } else {
+      const arr = [...this.items].sort(() => 0.5 - Math.random());
+      this.missingItem = arr.pop();
+      shuffled = arr;
+    }
 
     if (host) {
       host.innerHTML = `
@@ -530,18 +620,35 @@ class DrawGuessGame {
   constructor() {
     this.name = "🎨 5. DRAW & GUESS — الرسم والتخمين الإبداعي";
     this.duration = 25;
-    this.words = ["سفينة 🚢", "فيل 🐘", "قلعة 🏰", "صاروخ 🚀", "سيارة 🚗", "تاج 👑"];
+    this.words = ["سفينة 🚢", "فيل 🐘", "قلعة 🏰", "صاروخ 🚀", "سيارة 🚗", "تاج 👑", "شمس ☀️", "بيت 🏠"];
     this.targetWord = "";
+    this.currentColor = '#000000';
+    this.currentBrushSize = 4;
   }
 
-  initRound(host, mobile) {
-    this.targetWord = this.words[Math.floor(Math.random() * this.words.length)];
+  prepareRoundData() {
+    const word = this.words[Math.floor(Math.random() * this.words.length)];
+    return { targetWord: word };
+  }
+
+  initRound(host, mobile, roundData) {
+    if (roundData && roundData.targetWord) {
+      this.targetWord = roundData.targetWord;
+    } else if (stateStore && stateStore.targetWord) {
+      this.targetWord = stateStore.targetWord;
+    } else {
+      this.targetWord = this.words[Math.floor(Math.random() * this.words.length)];
+    }
+    if (stateStore) stateStore.targetWord = this.targetWord;
+    this.currentColor = '#000000';
+    this.currentBrushSize = 4;
 
     if (host) {
       host.innerHTML = `
         <div style="text-align:center;">
-          <h3 style="font-size:1.5rem; color:var(--gold);">الرسمة المطلوبة: <span style="color:var(--accent);">${this.targetWord}</span></h3>
-          <canvas id="host-draw-view" width="380" height="230" style="background:white; border-radius:16px; margin:15px 0; border:3px solid var(--border-color);"></canvas>
+          <h3 style="font-size:1.5rem; color:var(--gold);">الرسمة المطلوبة: <span style="color:var(--accent); font-size:1.8rem;">${this.targetWord}</span></h3>
+          <canvas id="host-draw-view" width="380" height="230" style="background:white; border-radius:16px; margin:15px 0; border:3px solid var(--gold); box-shadow:0 8px 30px rgba(0,0,0,0.5);"></canvas>
+          <p style="font-size:0.9rem; color:var(--text-muted);">رسمة اللاعبين تظهر هنا مباشرة عبر الفايربيز 🎨</p>
         </div>
       `;
     }
@@ -550,14 +657,29 @@ class DrawGuessGame {
       mobile.innerHTML = `
         <div style="text-align:center; width:100%; padding:10px 5px;">
           <p style="margin-bottom:10px; font-size:1.1rem;">ارسم الشكل المطلوب: <strong style="color:var(--gold); font-size:1.3rem;">${this.targetWord}</strong></p>
-          <canvas id="mobile-draw-canvas" width="300" height="220" style="background:white; border-radius:16px; width:100%; max-width:320px; touch-action:none; border:2px solid var(--gold);"></canvas>
+          <canvas id="mobile-draw-canvas" width="300" height="220" style="background:white; border-radius:16px; width:100%; max-width:320px; touch-action:none; border:2px solid var(--gold); cursor:crosshair;"></canvas>
+          
+          <div style="margin-top:10px; display:flex; justify-content:center; gap:8px; align-items:center;">
+            <div onclick="DrawGuessGame.setColor('#000000')" style="width:28px; height:28px; border-radius:50%; background:#000; cursor:pointer; border:2px solid white;"></div>
+            <div onclick="DrawGuessGame.setColor('#ef4444')" style="width:28px; height:28px; border-radius:50%; background:#ef4444; cursor:pointer; border:2px solid white;"></div>
+            <div onclick="DrawGuessGame.setColor('#3b82f6')" style="width:28px; height:28px; border-radius:50%; background:#3b82f6; cursor:pointer; border:2px solid white;"></div>
+            <div onclick="DrawGuessGame.setColor('#10b981')" style="width:28px; height:28px; border-radius:50%; background:#10b981; cursor:pointer; border:2px solid white;"></div>
+            <div onclick="DrawGuessGame.setColor('#f59e0b')" style="width:28px; height:28px; border-radius:50%; background:#f59e0b; cursor:pointer; border:2px solid white;"></div>
+          </div>
+
           <div style="margin-top:12px; display:flex; gap:10px; justify-content:center;">
-            <button class="btn secondary-btn secondary-sm" onclick="DrawGuessGame.clearCanvas()">مسح الرسمة 🗑️</button>
-            <button class="btn primary-btn primary-sm" onclick="DrawGuessGame.submitDraw()">تم الرسم! 🎨</button>
+            <button class="btn secondary-btn secondary-sm" onclick="DrawGuessGame.clearCanvas()">مسح 🗑️</button>
+            <button id="btn-submit-draw" class="btn primary-btn primary-sm" onclick="DrawGuessGame.submitDraw()">تم الرسم! 🎨</button>
           </div>
         </div>
       `;
       this.setupDrawing();
+    }
+  }
+
+  static setColor(color) {
+    if (window.gameEngine && window.gameEngine.activeGame) {
+      window.gameEngine.activeGame.currentColor = color;
     }
   }
 
@@ -568,19 +690,35 @@ class DrawGuessGame {
     let isDrawing = false;
     let syncTimeout = null;
 
+    const getCoords = (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const touch = (e.touches && e.touches.length > 0) ? e.touches[0] : ((e.changedTouches && e.changedTouches.length > 0) ? e.changedTouches[0] : e);
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      return {
+        x: (touch.clientX - rect.left) * scaleX,
+        y: (touch.clientY - rect.top) * scaleY
+      };
+    };
+
     const syncToFirebase = () => {
       if (syncTimeout) clearTimeout(syncTimeout);
       syncTimeout = setTimeout(() => {
-        const dataUrl = canvas.toDataURL();
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
         stateStore.submitDrawing(stateStore.getSelfId(), dataUrl);
-      }, 100);
+      }, 150);
     };
 
     const startDraw = (e) => {
+      if (e.cancelable) e.preventDefault();
       isDrawing = true;
-      draw(e);
+      const { x, y } = getCoords(e);
+      ctx.beginPath();
+      ctx.moveTo(x, y);
     };
-    const endDraw = () => {
+
+    const endDraw = (e) => {
+      if (e.cancelable) e.preventDefault();
       if (isDrawing) {
         isDrawing = false;
         ctx.beginPath();
@@ -589,21 +727,19 @@ class DrawGuessGame {
     };
 
     const draw = (e) => {
+      if (e.cancelable) e.preventDefault();
       if (!isDrawing) return;
-      const rect = canvas.getBoundingClientRect();
-      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      const { x, y } = getCoords(e);
 
-      ctx.lineWidth = 4;
+      ctx.lineWidth = this.currentBrushSize || 4;
       ctx.lineCap = 'round';
-      ctx.strokeStyle = '#000000';
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = this.currentColor || '#000000';
 
-      ctx.lineTo(clientX - rect.left, clientY - rect.top);
+      ctx.lineTo(x, y);
       ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(clientX - rect.left, clientY - rect.top);
 
-      // Sync drawing to host canvas locally if open
+      // Mirror directly to host canvas if open in same tab
       const hostCanvas = document.getElementById('host-draw-view');
       if (hostCanvas) {
         const hctx = hostCanvas.getContext('2d');
@@ -613,10 +749,13 @@ class DrawGuessGame {
 
     canvas.addEventListener('mousedown', startDraw);
     canvas.addEventListener('mouseup', endDraw);
+    canvas.addEventListener('mouseleave', endDraw);
     canvas.addEventListener('mousemove', draw);
-    canvas.addEventListener('touchstart', startDraw);
-    canvas.addEventListener('touchend', endDraw);
-    canvas.addEventListener('touchmove', draw);
+
+    canvas.addEventListener('touchstart', startDraw, { passive: false });
+    canvas.addEventListener('touchend', endDraw, { passive: false });
+    canvas.addEventListener('touchcancel', endDraw, { passive: false });
+    canvas.addEventListener('touchmove', draw, { passive: false });
   }
 
   static renderRemoteDrawing(drawingPayload) {
@@ -654,14 +793,25 @@ class DrawGuessGame {
   static submitDraw() {
     audioEngine.playVictoryFanfare();
     const canvas = document.getElementById('mobile-draw-canvas');
+    let dataUrl = '';
     if (canvas) {
-      stateStore.submitDrawing(stateStore.getSelfId(), canvas.toDataURL());
+      dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+      stateStore.submitDrawing(stateStore.getSelfId(), dataUrl);
     }
-    gameEngine.handlePlayerAnswer(stateStore.getSelfId(), { summary: "أنهى الرسمة! 🎨" });
+    gameEngine.handlePlayerAnswer(stateStore.getSelfId(), { summary: "أنهى الرسمة! 🎨", drawing: dataUrl });
+    const btn = document.getElementById('btn-submit-draw');
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "تم إرسال الرسمة بنجاح! 🎨✨";
+      btn.style.opacity = "0.7";
+    }
   }
 
-  calculateScores() {
-    stateStore.players.forEach(p => stateStore.updatePlayerScore(p.id, 200));
+  calculateScores(answers) {
+    // Award 250 XP to all players who submitted their drawing
+    Object.keys(answers).forEach(pid => {
+      stateStore.updatePlayerScore(pid, 250);
+    });
   }
 
   showRoundSummary(host) {
@@ -669,6 +819,12 @@ class DrawGuessGame {
       host.innerHTML = `
         <div style="text-align:center;">
           <h2>الرسمة الإبداعية كانت: <span style="color:var(--accent); font-size:2.2rem;">${this.targetWord}</span></h2>
+          ${stateStore.drawingData && stateStore.drawingData.data ? `
+            <div style="margin:15px auto; max-width:380px; padding:8px; background:white; border-radius:16px; border:3px solid var(--gold); box-shadow:0 8px 30px rgba(0,0,0,0.4);">
+              <img src="${stateStore.drawingData.data}" style="width:100%; height:200px; object-fit:contain; border-radius:10px; display:block;" alt="Drawing" />
+            </div>
+          ` : ''}
+          <p style="color:var(--gold); font-size:1.15rem; margin-top:10px;">حصل جميع الرسامين الذين شاركوا على +250 XP! 🎨⭐</p>
         </div>
       `;
     }

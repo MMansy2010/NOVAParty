@@ -121,6 +121,8 @@ class GameStateStore {
     if (data.isTimerPaused !== undefined) this.isTimerPaused = data.isTimerPaused;
     if (data.timer !== undefined) this.timer = data.timer;
     if (data.hostId) this.hostId = data.hostId;
+    if (data.targetWord) this.targetWord = data.targetWord;
+    if (data.activeChallenge) this.activeChallenge = data.activeChallenge;
     
     // Players List Sync
     if (data.players) {
@@ -215,6 +217,9 @@ class GameStateStore {
         logs: this.logs
       };
 
+      if (this.targetWord) updates.targetWord = this.targetWord;
+      if (this.activeChallenge) updates.activeChallenge = this.activeChallenge;
+
       if (this.players && this.players.length > 0) {
         const pObj = {};
         this.players.forEach(p => { pObj[p.id] = p; });
@@ -286,12 +291,10 @@ class GameStateStore {
         this.hostId = payload.hostId;
         this.players = [];
         this.currentPhase = 'lobby';
-        this.saveActiveRoomToStorage();
         break;
       case 'PLAYER_JOIN_REQUEST':
         if (payload) {
           this.addPlayer(payload);
-          this.saveActiveRoomToStorage();
         }
         break;
       case 'ROOM_STATE_SYNC':
@@ -302,13 +305,11 @@ class GameStateStore {
           if (payload.currentRound !== undefined) this.currentRound = payload.currentRound;
           if (payload.activeGameIndex !== undefined) this.activeGameIndex = payload.activeGameIndex;
         }
-        this.saveActiveRoomToStorage();
         break;
       case 'PLAYER_KICK':
         if (payload && payload.playerId) {
           this.players = this.players.filter(p => p.id !== payload.playerId);
           this.addLog(`🛑 تم استبعاد اللاعب من الغرفة.`);
-          this.saveActiveRoomToStorage();
         }
         break;
       case 'ROUND_STARTED':
@@ -316,21 +317,34 @@ class GameStateStore {
         if (payload) {
           this.activeGameIndex = payload.gameIndex !== undefined ? payload.gameIndex : this.activeGameIndex;
           this.currentRound = payload.currentRound || (this.activeGameIndex + 1);
+          if (payload.targetWord) this.targetWord = payload.targetWord;
+          if (payload.activeChallenge) this.activeChallenge = payload.activeChallenge;
         }
         this.answersMap = {};
         this.drawingData = null;
         this.addLog(`🎮 بدأت الجولة ${this.currentRound}`);
-        this.saveActiveRoomToStorage();
         break;
       case 'ROUND_FINISHED':
         this.currentPhase = 'summary';
         this.addLog(`🏁 انتهت الجولة ${this.currentRound}`);
-        this.saveActiveRoomToStorage();
         break;
       case 'SCORE_UPDATE':
         if (payload && payload.playerId) {
-          this.updatePlayerScore(payload.playerId, payload.pointsToAdd);
-          this.saveActiveRoomToStorage();
+          const p = this.players.find(x => x.id === payload.playerId);
+          if (p) {
+            if (payload.newScore !== undefined) {
+              p.score = Number(payload.newScore) || 0;
+            } else {
+              const pts = Number(payload.points || payload.pointsToAdd) || 0;
+              p.score = (Number(p.score) || 0) + pts;
+            }
+          }
+          this.players.sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0));
+        }
+        break;
+      case 'DRAWING_SYNC':
+        if (payload) {
+          this.drawingData = payload;
         }
         break;
       case 'SUBMIT_ANSWER':
@@ -432,9 +446,15 @@ class GameStateStore {
       this.addLog(`⭐ حصل ${p.name} على +${points} XP (المجموع: ${p.score})`);
       if (this.db && this.roomCode) {
         this.db.ref(`rooms/${this.roomCode.toUpperCase()}/players/${playerId}/score`).set(p.score);
+        this.db.ref(`rooms/${this.roomCode.toUpperCase()}`).update({
+          lastAction: 'SCORE_UPDATE',
+          lastPayload: { playerId, points, newScore: p.score },
+          lastTimestamp: Date.now()
+        });
       }
     }
     this.players.sort((a, b) => (b.score || 0) - (a.score || 0));
+    this.notifyListeners('SCORE_UPDATE', { playerId, points, newScore: p ? p.score : 0 });
   }
 
   onAnswerReceived(data) {
@@ -464,7 +484,6 @@ class GameStateStore {
     this.unlockedEvidences = [];
     this.accusations = {};
     this.logs = ['[نظام] تم إعادة ضبط الغرفة.'];
-    this.saveActiveRoomToStorage();
     if (this.db && this.roomCode) {
       const pObj = {};
       this.players.forEach(p => { pObj[p.id] = p; });
